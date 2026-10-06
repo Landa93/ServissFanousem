@@ -4,7 +4,7 @@
    2) Spusť SQL ze souboru supabase.sql.
    ========================================================= */
 const SUPABASE_URL = "https://ujtpluckaenrplkfpzgi.supabase.co";
-const SUPABASE_PUBLISHABLE_KEY = "TVŮJ_ANON_NEBO_PUBLISHABLE_KLÍČ";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_5Sf5fpEYUA2Q3dp74c1q3w_XzKRTST7";
 const PHOTO_BUCKET = "photos";
 const TARGET_BYTES = 200 * 1024;
 
