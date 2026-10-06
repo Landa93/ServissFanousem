@@ -1,6 +1,6 @@
 /* =========================================================
    ServisSFanoušem
-   1) Nahraď SUPABASE_URL a SUPABASE_PUBLISHABLE_KEY.
+   
    2) Spusť SQL ze souboru supabase.sql.
    ========================================================= */
 const SUPABASE_URL = "https://ujtpluckaenrplkfpzgi.supabase.co";
