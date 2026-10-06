@@ -164,9 +164,10 @@ async function signIn() {
       password
     });
 
-  if (error) {
-    toast(error.message);
-  }
+if (error) {
+  console.error("CHYBA UPLOADU FOTKY:", error);
+  toast(`Upload chyba: ${error.message}`);
+  return;
 }
 
 async function signUp() {
