@@ -8,7 +8,7 @@ async function renderGallery() {
 
   const {
     data: photos,
-    error
+    error: photosError
   } = await sb
     .from("photos")
     .select("*")
@@ -23,21 +23,20 @@ async function renderGallery() {
       }
     );
 
-  if (error) {
+  if (photosError) {
     console.error(
-      "PHOTO DATABASE ERROR:",
-      error
+      "CHYBA DB FOTEK:",
+      photosError
     );
 
     toast(
-      `Fotky: ${error.message}`
+      `Fotky: ${photosError.message}`
     );
 
     return;
   }
 
-  const list =
-    photos || [];
+  const list = photos || [];
 
   if (count) {
     count.textContent =
@@ -59,52 +58,44 @@ async function renderGallery() {
     return;
   }
 
-  const paths =
-    list.map(
-      photo =>
-        photo.path
-    );
+  for (let i = 0; i < list.length; i++) {
+    const photo = list[i];
 
-  const {
-    data: signedUrls,
-    error: urlError
-  } =
-    await sb.storage
-      .from(PHOTO_BUCKET)
-      .createSignedUrls(
-        paths,
-        3600
-      );
-
-  if (urlError) {
-    console.error(
-      "PHOTO URL ERROR:",
-      urlError
-    );
-
-    toast(
-      `Fotku nelze zobrazit: ${urlError.message}`
-    );
-
-    return;
-  }
-
-  list.forEach(
-    (photo, index) => {
-      const result =
-        signedUrls?.[index];
-
-      if (
-        !result ||
-        !result.signedUrl
-      ) {
-        console.error(
-          "CHYBÍ SIGNED URL:",
-          photo,
-          result
+    try {
+      const {
+        data: signed,
+        error: signedError
+      } = await sb.storage
+        .from(PHOTO_BUCKET)
+        .createSignedUrl(
+          photo.path,
+          3600
         );
 
-        return;
+      if (signedError) {
+        console.error(
+          "CHYBA URL FOTKY:",
+          photo.path,
+          signedError
+        );
+
+        toast(
+          `Fotku nelze zobrazit: ${signedError.message}`
+        );
+
+        continue;
+      }
+
+      if (
+        !signed ||
+        !signed.signedUrl
+      ) {
+        console.error(
+          "SUPABASE NEVRÁTIL URL:",
+          photo
+        );
+
+        continue;
       }
 
       const figure =
@@ -121,10 +112,10 @@ async function renderGallery() {
         );
 
       image.src =
-        result.signedUrl;
+        signed.signedUrl;
 
       image.alt =
-        `Fotka okna ${index + 1}`;
+        `Fotka ${i + 1}`;
 
       image.loading =
         "lazy";
@@ -136,7 +127,7 @@ async function renderGallery() {
         "click",
         () => {
           window.open(
-            result.signedUrl,
+            signed.signedUrl,
             "_blank"
           );
         }
@@ -145,12 +136,24 @@ async function renderGallery() {
       image.addEventListener(
         "error",
         () => {
-          image.alt =
-            "Fotku se nepodařilo zobrazit";
-
           console.error(
-            "IMAGE LOAD ERROR:",
-            result.signedUrl
+            "PROHLÍŽEČ NENAČETL FOTKU:",
+            signed.signedUrl
+          );
+
+          image.style.display =
+            "none";
+
+          const errorText =
+            document.createElement(
+              "div"
+            );
+
+          errorText.textContent =
+            "Fotku se nepodařilo načíst.";
+
+          figure.appendChild(
+            errorText
           );
         }
       );
@@ -162,6 +165,16 @@ async function renderGallery() {
       gallery.appendChild(
         figure
       );
+
+    } catch (error) {
+      console.error(
+        "CHYBA GALERIE:",
+        error
+      );
+
+      toast(
+        `Galerie: ${error.message}`
+      );
     }
-  );
+  }
 }
