@@ -1091,28 +1091,7 @@ async function uploadPhotos(files) {
    GALERIE FOTEK
    ========================================================= */
 
-async function renderGallery() {
-  if (!currentCustomer) return;
 
-  const { data, error } =
-    await sb
-      .from("photos")
-      .select("*")
-      .eq(
-        "customer_id",
-        currentCustomer.id
-      )
-      .order("created_at", {
-        ascending: false
-      });
-
-  if (error) {
-    toast(
-      `Chyba načtení fotek: ${error.message}`
-    );
-
-    return;
-  }
 
   const photos = data || [];
 
