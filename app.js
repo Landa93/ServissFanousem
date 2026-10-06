@@ -220,12 +220,46 @@ async function renderGallery(){
 }
 async function createCustomer(e){
   e.preventDefault();
+
   const payload={
-    user_id:currentUser.id,full_name:$("fullName").value.trim(),phone:$("phone").value.trim(),
-    email:$("email").value.trim(),address:$("address").value.trim(),problem:$("problem").value.trim(),
-    appointment_at:$("appointmentAt").value?new Date($("appointmentAt").value).toISOString():null,
+    user_id:currentUser.id,
+    full_name:$("fullName").value.trim(),
+    phone:$("phone").value.trim(),
+    email:$("email").value.trim(),
+    address:$("address").value.trim(),
+    problem:$("problem").value.trim(),
+    appointment_at:$("appointmentAt").value
+      ? new Date($("appointmentAt").value).toISOString()
+      : null,
     status:"Naplánováno"
   };
+
+  const {data,error}=await sb
+    .from("customers")
+    .insert(payload)
+    .select()
+    .single();
+
+  if(error){
+    toast(error.message);
+    return;
+  }
+
+  // Přidáme nového zákazníka ihned do seznamu.
+  customers=[data,...customers.filter(c=>c.id!==data.id)];
+
+  $("customerForm").reset();
+
+  renderHome();
+  renderCustomers();
+
+  currentCustomer=data;
+  renderDetail();
+  showView("detailView");
+  await renderGallery();
+
+  toast("Zákazník uložen.");
+}
   const {data,error}=await sb.from("customers").insert(payload).select().single();
   if(error){toast(error.message);return}
   $("customerForm").reset();await loadCustomers();await openCustomer(data.id);toast("Zákazník uložen.");
