@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0f766e">
+  <meta name="description" content="ServisSFanoušem – servis oken">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="ServisSFanoušem">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="styles.css">
+  <title>ServisSFanoušem</title>
+</head>
+<body>
+  <div id="toast" class="toast" role="status"></div>
+
+  <section id="authView" class="auth-wrap">
+    <div class="auth-card">
+      <div class="logo">🪟</div>
+      <h1>ServisSFanoušem</h1>
+      <p class="muted">Servis oken vždy po ruce.</p>
+
+      <div class="auth-tabs">
+        <button class="tab active" data-auth-tab="login">Přihlášení</button>
+        <button class="tab" data-auth-tab="register">Registrace</button>
+      </div>
+
+      <form id="authForm">
+        <label>E-mail<input id="authEmail" type="email" autocomplete="email" required></label>
+        <label>Heslo<input id="authPassword" type="password" autocomplete="current-password" minlength="6" required></label>
+        <button id="authSubmit" class="primary big" type="submit">Přihlásit</button>
+      </form>
+      <p id="authHint" class="hint">Přihlášení zůstává uložené v tomto zařízení.</p>
+    </div>
+  </section>
+
+  <section id="appView" class="hidden">
+    <header class="topbar">
+      <div>
+        <div class="brand">🪟 ServisSFanoušem</div>
+        <div id="userLabel" class="small"></div>
+      </div>
+      <button id="logoutBtn" class="ghost">Odhlásit</button>
+    </header>
+
+    <main class="container">
+      <div id="homeView">
+        <div class="hero-actions">
+          <button id="newCustomerBtn" class="primary big">＋ Nový zákazník</button>
+          <button id="customersBtn" class="secondary big">👥 Stávající zákazníci</button>
+        </div>
+
+        <section class="panel">
+          <div class="section-title">
+            <h2>🔔 Blížící se servisy</h2>
+            <span id="reminderCount" class="badge">0</span>
+          </div>
+          <div id="reminders"></div>
+        </section>
+
+        <section class="panel">
+          <div class="section-title"><h2>Dnešní přehled</h2></div>
+          <div id="stats" class="stats"></div>
+        </section>
+      </div>
+
+      <div id="customersView" class="hidden">
+        <div class="page-head">
+          <button class="ghost" data-back>← Zpět</button>
+          <h2>Stávající zákazníci</h2>
+        </div>
+        <input id="customerSearch" class="search" placeholder="🔎 Hledat podle jména, telefonu nebo adresy">
+        <div id="customerList"></div>
+      </div>
+
+      <div id="customerFormView" class="hidden">
+        <div class="page-head">
+          <button class="ghost" data-back>← Zpět</button>
+          <h2>Nový zákazník</h2>
+        </div>
+        <form id="customerForm" class="panel form-grid">
+          <label>Jméno a příjmení*
+            <input id="fullName" required autocomplete="name">
+          </label>
+          <label>Telefon
+            <input id="phone" type="tel" autocomplete="tel">
+          </label>
+          <label>E-mail
+            <input id="email" type="email" autocomplete="email">
+          </label>
+          <label>Adresa
+            <input id="address" autocomplete="street-address">
+          </label>
+          <label class="wide">Popis problému s okny
+            <textarea id="problem" rows="5"></textarea>
+          </label>
+          <label>Termín opravy
+            <input id="appointmentAt" type="datetime-local">
+          </label>
+          <div class="wide actions">
+            <button class="primary big" type="submit">Uložit zákazníka</button>
+          </div>
+        </form>
+      </div>
+
+      <div id="detailView" class="hidden">
+        <div class="page-head">
+          <button class="ghost" data-back>← Zpět</button>
+          <h2 id="detailTitle">Zákazník</h2>
+        </div>
+
+        <section class="panel">
+          <div id="detailStatus"></div>
+          <div class="detail-grid">
+            <div><span>Telefon</span><a id="detailPhone" href="#"></a></div>
+            <div><span>E-mail</span><a id="detailEmail" href="#"></a></div>
+            <div class="wide"><span>Adresa</span><p id="detailAddress"></p></div>
+            <div class="wide"><span>Problém</span><p id="detailProblem"></p></div>
+            <div><span>Termín opravy</span><p id="detailAppointment"></p></div>
+            <div><span>Roční servis</span><p id="detailAnnual"></p></div>
+          </div>
+          <div class="actions">
+            <button id="saveDetailBtn" class="secondary">Uložit změny</button>
+            <button id="completeBtn" class="success big">✓ Oprava dokončena → Převést na roční servis</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="section-title">
+            <h2>📷 Galerie fotek</h2>
+            <span id="photoCount" class="badge">0</span>
+          </div>
+          <label class="upload-btn">
+            📸 Vyfotit / vybrat fotky
+            <input id="photoInput" type="file" accept="image/*" capture="environment" multiple>
+          </label>
+          <p class="hint">Fotky se před odesláním automaticky zmenší na přibližně 200 KB.</p>
+          <div id="gallery" class="gallery"></div>
+        </section>
+      </div>
+    </main>
+
+    <nav class="bottom-nav">
+      <button data-nav="home">🏠 Domů</button>
+      <button data-nav="customers">👥 Zákazníci</button>
+      <button data-nav="new">＋ Nový</button>
+    </nav>
+  </section>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="app.js"></script>
+</body>
+</html>
