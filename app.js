@@ -234,16 +234,8 @@ async function createCustomer(e){
     status:"Naplánováno"
   };
 
-  const {data,error}=await sb
-    .from("customers")
-    .insert(payload)
-    .select()
-    .single();
-
-  if(error){
-    toast(error.message);
-    return;
-  }
+  customers=data||[];
+console.log("NAČTENÍ ZÁKAZNÍKŮ:", customers.length, customers);
 
   // Přidáme nového zákazníka ihned do seznamu.
   customers=[data,...customers.filter(c=>c.id!==data.id)];
