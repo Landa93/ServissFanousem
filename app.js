@@ -1,180 +1,98 @@
 async function renderGallery() {
-  if (!currentCustomer) {
-    return;
-  }
+  if (!currentCustomer) return;
 
-  const gallery = $("gallery");
-  const count = $("photoCount");
-
-  const {
-    data: photos,
-    error: photosError
-  } = await sb
+  const { data: photos, error } = await sb
     .from("photos")
     .select("*")
-    .eq(
-      "customer_id",
-      currentCustomer.id
-    )
-    .order(
-      "created_at",
-      {
-        ascending: false
-      }
-    );
+    .eq("customer_id", currentCustomer.id)
+    .order("created_at", {
+      ascending: false
+    });
 
-  if (photosError) {
-    console.error(
-      "CHYBA DB FOTEK:",
-      photosError
-    );
-
-    toast(
-      `Fotky: ${photosError.message}`
-    );
-
+  if (error) {
+    toast(`Chyba načtení fotek: ${error.message}`);
     return;
   }
 
   const list = photos || [];
 
-  if (count) {
-    count.textContent =
-      String(list.length);
+  if ($("photoCount")) {
+    $("photoCount").textContent = list.length;
   }
-
-  if (!gallery) {
-    return;
-  }
-
-  gallery.innerHTML = "";
 
   if (!list.length) {
-    gallery.innerHTML =
-      `<p class="muted">
-        Zatím zde nejsou žádné fotky.
-      </p>`;
-
+    if ($("gallery")) {
+      $("gallery").innerHTML =
+        "<p class='muted'>Zatím zde nejsou žádné fotky.</p>";
+    }
     return;
   }
+
+  const gallery = $("gallery");
+
+  if (!gallery) return;
+
+  gallery.innerHTML = "";
 
   for (let i = 0; i < list.length; i++) {
     const photo = list[i];
 
+    const figure = document.createElement("figure");
+    figure.className = "photo-item";
+
     try {
-      const {
-        data: signed,
-        error: signedError
-      } = await sb.storage
-        .from(PHOTO_BUCKET)
-        .createSignedUrl(
-          photo.path,
-          3600
-        );
+      const { data, error: signedError } =
+        await sb.storage
+          .from(PHOTO_BUCKET)
+          .createSignedUrl(
+            photo.path,
+            3600
+          );
 
       if (signedError) {
-        console.error(
-          "CHYBA URL FOTKY:",
-          photo.path,
-          signedError
-        );
-
-        toast(
-          `Fotku nelze zobrazit: ${signedError.message}`
-        );
-
-        continue;
+        throw signedError;
       }
 
-      if (
-        !signed ||
-        !signed.signedUrl
-      ) {
-        console.error(
-          "SUPABASE NEVRÁTIL URL:",
-          photo
+      if (!data || !data.signedUrl) {
+        throw new Error(
+          "Supabase nevytvořil odkaz k fotce."
         );
-
-        continue;
       }
 
-      const figure =
-        document.createElement(
-          "figure"
+      const img = document.createElement("img");
+
+      img.src = data.signedUrl;
+      img.alt = `Fotka okna ${i + 1}`;
+      img.loading = "lazy";
+
+      img.addEventListener("click", () => {
+        window.open(
+          data.signedUrl,
+          "_blank"
         );
+      });
 
-      figure.className =
-        "gallery-item";
+      img.addEventListener("error", () => {
+        figure.innerHTML =
+          "<p>Fotku se nepodařilo načíst.</p>";
+      });
 
-      const image =
-        document.createElement(
-          "img"
-        );
-
-      image.src =
-        signed.signedUrl;
-
-      image.alt =
-        `Fotka ${i + 1}`;
-
-      image.loading =
-        "lazy";
-
-      image.style.cursor =
-        "pointer";
-
-      image.addEventListener(
-        "click",
-        () => {
-          window.open(
-            signed.signedUrl,
-            "_blank"
-          );
-        }
-      );
-
-      image.addEventListener(
-        "error",
-        () => {
-          console.error(
-            "PROHLÍŽEČ NENAČETL FOTKU:",
-            signed.signedUrl
-          );
-
-          image.style.display =
-            "none";
-
-          const errorText =
-            document.createElement(
-              "div"
-            );
-
-          errorText.textContent =
-            "Fotku se nepodařilo načíst.";
-
-          figure.appendChild(
-            errorText
-          );
-        }
-      );
-
-      figure.appendChild(
-        image
-      );
-
-      gallery.appendChild(
-        figure
-      );
+      figure.appendChild(img);
 
     } catch (error) {
       console.error(
-        "CHYBA GALERIE:",
+        "CHYBA ZOBRAZENÍ FOTKY:",
         error
       );
 
-      toast(
-        `Galerie: ${error.message}`
-      );
+      figure.innerHTML = `
+        <p style="color:#b00020;">
+          Fotku nelze zobrazit.<br>
+          ${error.message}
+        </p>
+      `;
     }
+
+    gallery.appendChild(figure);
   }
 }
