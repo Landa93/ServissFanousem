@@ -3,7 +3,7 @@
    1) Nahraď SUPABASE_URL a SUPABASE_PUBLISHABLE_KEY.
    2) Spusť SQL ze souboru supabase.sql.
    ========================================================= */
-const SUPABASE_URL = "https://ceefnfznymmpjnowpjgv.supabase.co";
+const SUPABASE_URL = "https://ujtpluckaenrplkfpzgi.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "TVŮJ_ANON_NEBO_PUBLISHABLE_KLÍČ";
 const PHOTO_BUCKET = "photos";
 const TARGET_BYTES = 200 * 1024;
