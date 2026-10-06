@@ -1347,16 +1347,20 @@ if ($("saveDetailBtn")) {
    SUPABASE AUTH
    ========================================================= */
 
-sb.auth.onAuthStateChange(
-  (_event, session) => {
-    startApp(session);
-  }
-);
-
 setAuthMode("login");
 
-sb.auth
-  .getSession()
-  .then(({ data }) => {
-    startApp(data.session);
-  });
+async function initApp() {
+  const {
+    data: { session }
+  } = await sb.auth.getSession();
+
+  await startApp(session);
+
+  sb.auth.onAuthStateChange(
+    async (_event, newSession) => {
+      await startApp(newSession);
+    }
+  );
+}
+
+initApp();
