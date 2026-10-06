@@ -642,6 +642,84 @@ async function editCustomer() {
 }
 
 /* =========================================================
+   SMAZÁNÍ ZÁKAZNÍKA
+   ========================================================= */
+
+async function deleteCustomer() {
+  if (!currentCustomer || !currentUser) return;
+
+  const confirmed = confirm(
+    `Opravdu chcete smazat zákazníka ${currentCustomer.full_name}?\n\nSmaže se zákazník i všechny jeho fotografie. Tuto akci nelze vrátit.`
+  );
+
+  if (!confirmed) return;
+
+  const customerId = currentCustomer.id;
+
+  const { data: photos, error: photosError } =
+    await sb
+      .from("photos")
+      .select("path")
+      .eq("customer_id", customerId)
+      .eq("user_id", currentUser.id);
+
+  if (photosError) {
+    toast(photosError.message);
+    return;
+  }
+
+  if (photos && photos.length) {
+    const paths = photos.map(photo => photo.path);
+
+    const { error: storageError } =
+      await sb.storage
+        .from(PHOTO_BUCKET)
+        .remove(paths);
+
+    if (storageError) {
+      toast(storageError.message);
+      return;
+    }
+  }
+
+  const { error: dbPhotosError } =
+    await sb
+      .from("photos")
+      .delete()
+      .eq("customer_id", customerId)
+      .eq("user_id", currentUser.id);
+
+  if (dbPhotosError) {
+    toast(dbPhotosError.message);
+    return;
+  }
+
+  const { error } =
+    await sb
+      .from("customers")
+      .delete()
+      .eq("id", customerId)
+      .eq("user_id", currentUser.id);
+
+  if (error) {
+    toast(error.message);
+    return;
+  }
+
+  customers = customers.filter(
+    c => c.id !== customerId
+  );
+
+  currentCustomer = null;
+
+  renderHome();
+  renderCustomers();
+  showView("customersView");
+
+  toast("Zákazník byl smazán.");
+}
+
+/* =========================================================
    DOKONČENÍ OPRAVY
    ========================================================= */
 
@@ -774,9 +852,6 @@ async function createCustomer(e) {
     data
   );
 
-  /* Okamžitě přidáme nového zákazníka
-     do seznamu v aplikaci. */
-
   customers = [
     data,
     ...customers.filter(
@@ -784,16 +859,10 @@ async function createCustomer(e) {
     )
   ];
 
-  /* Vyčistíme formulář. */
-
   $("customerForm").reset();
-
-  /* Překreslíme seznam a statistiky. */
 
   renderHome();
   renderCustomers();
-
-  /* Otevřeme detail právě vytvořeného zákazníka. */
 
   currentCustomer = data;
 
@@ -1173,11 +1242,7 @@ async function startApp(session) {
     );
   }
 
-  /* Načteme zákazníky vždy po přihlášení. */
-
   await loadCustomers();
-
-  /* Realtime připojíme pouze jednou. */
 
   if (!appStarted) {
     subscribeRealtime();
@@ -1340,6 +1405,13 @@ if ($("saveDetailBtn")) {
   $("saveDetailBtn").addEventListener(
     "click",
     editCustomer
+  );
+}
+
+if ($("deleteCustomerBtn")) {
+  $("deleteCustomerBtn").addEventListener(
+    "click",
+    deleteCustomer
   );
 }
 
