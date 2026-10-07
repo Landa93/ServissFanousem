@@ -1614,17 +1614,32 @@ function subscribeRealtime() {
    AUTH STAV
    ========================================================= */
 
-sb.auth.onAuthStateChange(
-  async (
-    event,
-    session
-  ) => {
-    await startApp(
-      session
-    );
-  }
-);
+setAuthMode("login");
 
+async function initApp() {
+  // Nejprve zjistíme, jestli už existuje přihlášená relace
+  const {
+    data: { session }
+  } = await sb.auth.getSession();
+
+  if (session) {
+    startApp(session);
+  } else {
+    startApp(null);
+  }
+
+  // Změny přihlášení pouze zachytíme.
+  // Nenecháváme Auth callback čekat na načítání databáze.
+  sb.auth.onAuthStateChange(
+    (_event, newSession) => {
+      setTimeout(() => {
+        startApp(newSession);
+      }, 0);
+    }
+  );
+}
+
+initApp();
 /* =========================================================
    START
    ========================================================= */
