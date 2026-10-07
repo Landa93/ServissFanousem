@@ -1,11 +1,9 @@
 /* =========================================================
-   ServisSFanoušem
-   Kompletní app.js
+   ServisSFanoušem – NOVÁ VERZE
    ========================================================= */
 
 const SUPABASE_URL = "https://ujtpluckaenrplkfpzgi.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_5Sf5fpEYUA2Q3dp74c1q3w_XzKRTST7";
-
 const PHOTO_BUCKET = "photos";
 const TARGET_BYTES = 200 * 1024;
 
@@ -16,19 +14,17 @@ const sb = supabase.createClient(
     auth: {
       persistSession: true,
       autoRefreshToken: true,
-      detectSessionInUrl: true
+      detectSessionInUrl: false
     }
   }
 );
 
 let currentUser = null;
-let currentCustomer = null;
 let customers = [];
-let appStarted = false;
+let currentCustomer = null;
+let authMode = "login";
 
-function $(id) {
-  return document.getElementById(id);
-}
+const $ = id => document.getElementById(id);
 
 function toast(message) {
   const el = $("toast");
@@ -41,114 +37,130 @@ function toast(message) {
   el.textContent = message;
   el.classList.add("show");
 
-  clearTimeout(toast.timer);
+  clearTimeout(window.__toastTimer);
 
-  toast.timer = setTimeout(() => {
-    el.classList.remove("show");
-  }, 3500);
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function formatDate(value) {
-  if (!value) return "—";
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "—";
-  }
-
-  return date.toLocaleDateString(
-    "cs-CZ",
-    {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric"
-    }
+  window.__toastTimer = setTimeout(
+    () => el.classList.remove("show"),
+    3500
   );
 }
 
-function formatDateTime(value) {
+function esc(value) {
+  return String(value ?? "").replace(
+    /[&<>"']/g,
+    ch => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#039;"
+    }[ch])
+  );
+}
+
+function fmtDate(value, withTime = false) {
   if (!value) return "—";
 
-  const date = new Date(value);
+  const d = new Date(value);
 
-  if (Number.isNaN(date.getTime())) {
+  if (Number.isNaN(d.getTime())) {
     return "—";
   }
 
-  return date.toLocaleString(
+  return new Intl.DateTimeFormat(
     "cs-CZ",
-    {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit"
-    }
+    withTime
+      ? {
+          dateStyle: "medium",
+          timeStyle: "short"
+        }
+      : {
+          dateStyle: "medium"
+        }
+  ).format(d);
+}
+
+function daysUntil(value) {
+  if (!value) return 999999;
+
+  const d = new Date(`${value}T00:00:00`);
+  const now = new Date();
+
+  d.setHours(0, 0, 0, 0);
+  now.setHours(0, 0, 0, 0);
+
+  return Math.ceil(
+    (d - now) / 86400000
   );
+}
+
+function nextAnnualDate(baseDate = new Date()) {
+  const d = new Date(baseDate);
+
+  d.setFullYear(
+    d.getFullYear() + 1
+  );
+
+  return d.toISOString().slice(0, 10);
 }
 
 function showView(id) {
-  document
-    .querySelectorAll(".view")
-    .forEach(view => {
-      view.classList.add("hidden");
-    });
+  [
+    "homeView",
+    "customersView",
+    "customerFormView",
+    "detailView"
+  ].forEach(name => {
+    const el = $(name);
 
-  const view = $(id);
+    if (el) {
+      el.classList.add("hidden");
+    }
+  });
 
-  if (view) {
-    view.classList.remove("hidden");
+  const target = $(id);
+
+  if (target) {
+    target.classList.remove("hidden");
   }
+
+  window.scrollTo({
+    top: 0,
+    behavior: "smooth"
+  });
 }
 
-function setAuthMode(mode) {
-  const login = mode === "login";
-
-  if ($("loginForm")) {
-    $("loginForm").classList.toggle(
-      "hidden",
-      !login
-    );
-  }
-
-  if ($("registerForm")) {
-    $("registerForm").classList.toggle(
-      "hidden",
-      login
-    );
-  }
-
-  document
-    .querySelectorAll("[data-auth-tab]")
-    .forEach(button => {
-      button.classList.toggle(
-        "active",
-        button.dataset.authTab === mode
-      );
-    });
-}
 
 /* =========================================================
    PŘIHLÁŠENÍ
    ========================================================= */
 
-```js
+function setAuthMode(mode) {
+  authMode = mode;
+
+  document
+    .querySelectorAll("[data-auth-tab]")
+    .forEach(btn => {
+      btn.classList.toggle(
+        "active",
+        btn.dataset.authTab === mode
+      );
+    });
+
+  if ($("authSubmit")) {
+    $("authSubmit").textContent =
+      mode === "login"
+        ? "Přihlásit"
+        : "Vytvořit účet";
+  }
+}
+
 async function signIn() {
   const email =
-    $("authEmail").value.trim();
+    $("authEmail")?.value.trim();
 
   const password =
-    $("authPassword").value;
+    $("authPassword")?.value || "";
 
   if (!email || !password) {
     toast("Vyplň e-mail a heslo.");
@@ -164,22 +176,89 @@ async function signIn() {
   });
 
   if (error) {
-    console.error(
-      "CHYBA PŘI PŘIHLÁŠENÍ:",
-      error
+    console.error(error);
+
+    toast(
+      `Přihlášení se nepodařilo: ${error.message}`
     );
 
-    toast(error.message);
     return;
   }
 
-  // Přihlášení proběhlo.
-  // Použijeme přímo vrácenou session.
-  if (data && data.session) {
+  if (!data.session) {
+    toast(
+      "Přihlášení se nepodařilo dokončit."
+    );
+
+    return;
+  }
+
+  await startApp(data.session);
+}
+
+async function signUp() {
+  const email =
+    $("authEmail")?.value.trim();
+
+  const password =
+    $("authPassword")?.value || "";
+
+  if (!email || !password) {
+    toast("Vyplň e-mail a heslo.");
+    return;
+  }
+
+  if (password.length < 6) {
+    toast(
+      "Heslo musí mít alespoň 6 znaků."
+    );
+
+    return;
+  }
+
+  const {
+    data,
+    error
+  } = await sb.auth.signUp({
+    email,
+    password
+  });
+
+  if (error) {
+    toast(
+      `Registrace se nepodařila: ${error.message}`
+    );
+
+    return;
+  }
+
+  if (data.session) {
     await startApp(data.session);
+  } else {
+    toast(
+      "Účet je vytvořen. Pokud Supabase vyžaduje potvrzení e-mailu, potvrď ho a potom se přihlas."
+    );
   }
 }
-```
+
+async function logout() {
+  await sb.auth.signOut();
+
+  currentUser = null;
+  customers = [];
+  currentCustomer = null;
+
+  if ($("appView")) {
+    $("appView").classList.add("hidden");
+  }
+
+  if ($("authView")) {
+    $("authView").classList.remove("hidden");
+  }
+
+  showView("homeView");
+}
+
 
 /* =========================================================
    ZÁKAZNÍCI
@@ -188,29 +267,28 @@ async function signIn() {
 async function loadCustomers() {
   if (!currentUser) return;
 
-  const { data, error } =
-    await sb
-      .from("customers")
-      .select("*")
-      .eq(
-        "user_id",
-        currentUser.id
-      )
-      .order(
-        "created_at",
-        {
-          ascending: false
-        }
-      );
-
-  if (error) {
-    console.error(
-      "CHYBA NAČTENÍ ZÁKAZNÍKŮ:",
-      error
+  const {
+    data,
+    error
+  } = await sb
+    .from("customers")
+    .select("*")
+    .eq(
+      "user_id",
+      currentUser.id
+    )
+    .order(
+      "created_at",
+      {
+        ascending: false
+      }
     );
 
+  if (error) {
+    console.error(error);
+
     toast(
-      `Zákazníky se nepodařilo načíst: ${error.message}`
+      `Chyba zákazníků: ${error.message}`
     );
 
     return;
@@ -218,530 +296,668 @@ async function loadCustomers() {
 
   customers = data || [];
 
+  renderHome();
   renderCustomers();
-  renderUpcomingServices();
-}
 
-function renderCustomers() {
-  const list = $("customersList");
+  if (currentCustomer) {
+    const fresh =
+      customers.find(
+        c =>
+          c.id ===
+          currentCustomer.id
+      );
 
-  if (!list) return;
+    if (fresh) {
+      currentCustomer = fresh;
 
-  if (!customers.length) {
-    list.innerHTML =
-      "<p class='muted'>Zatím zde nejsou žádní zákazníci.</p>";
-
-    return;
+      renderDetail();
+    }
   }
-
-  list.innerHTML =
-    customers
-      .map(customer => {
-        const status =
-          customer.status || "Oprava";
-
-        return `
-          <button
-            class="customer-card"
-            data-open-customer="${escapeHtml(customer.id)}"
-          >
-            <strong>
-              ${escapeHtml(customer.full_name)}
-            </strong>
-
-            <span>
-              ${escapeHtml(customer.phone || "")}
-            </span>
-
-            <small>
-              ${escapeHtml(status)}
-            </small>
-          </button>
-        `;
-      })
-      .join("");
 }
 
-function getDaysUntil(value) {
-  if (!value) return null;
-
-  const now = new Date();
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-
-  const today =
-    new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate()
-    );
-
-  const target =
-    new Date(
-      date.getFullYear(),
-      date.getMonth(),
-      date.getDate()
-    );
-
-  return Math.ceil(
-    (target - today) /
-      (1000 * 60 * 60 * 24)
-  );
-}
-
-function renderUpcomingServices() {
-  const list =
-    $("upcomingServices");
-
-  if (!list) return;
-
-  const upcoming =
+function renderHome() {
+  const reminders =
     customers
-      .filter(customer => {
-        if (
-          customer.status !==
-          "Dokončeno"
-        ) {
-          return false;
-        }
-
-        const days =
-          getDaysUntil(
-            customer.annual_service_due
-          );
-
-        return (
-          days !== null &&
-          days >= 0 &&
-          days <= 14
-        );
-      })
+      .filter(
+        c =>
+          c.annual_service_due
+      )
+      .filter(
+        c =>
+          daysUntil(
+            c.annual_service_due
+          ) <= 14
+      )
       .sort(
         (a, b) =>
-          new Date(
+          String(
             a.annual_service_due
-          ) -
-          new Date(
-            b.annual_service_due
+          ).localeCompare(
+            String(
+              b.annual_service_due
+            )
           )
       );
 
-  if (!upcoming.length) {
-    list.innerHTML =
-      "<p class='muted'>Žádný servis není v příštích 14 dnech.</p>";
-
-    return;
+  if ($("reminderCount")) {
+    $("reminderCount").textContent =
+      reminders.length;
   }
 
-  list.innerHTML =
-    upcoming
-      .map(customer => {
-        const days =
-          getDaysUntil(
-            customer.annual_service_due
-          );
+  if ($("reminders")) {
+    $("reminders").innerHTML =
+      reminders.length
+        ? reminders
+            .map(c => {
+              const days =
+                daysUntil(
+                  c.annual_service_due
+                );
 
-        return `
-          <button
-            class="service-alert"
-            data-open-customer="${escapeHtml(customer.id)}"
-          >
-            <strong>
-              ${escapeHtml(customer.full_name)}
-            </strong>
+              const when =
+                days < 0
+                  ? `po termínu o ${Math.abs(days)} dní`
+                  : days === 0
+                  ? "dnes"
+                  : `za ${days} dní`;
 
-            <span>
-              Servis:
-              ${formatDate(
-                customer.annual_service_due
-              )}
-            </span>
+              return `
+                <div class="reminder ${
+                  days < 0
+                    ? "overdue"
+                    : ""
+                }">
 
-            <b>
-              ${
-                days === 0
-                  ? "DNES"
-                  : `za ${days} dní`
-              }
-            </b>
-          </button>
-        `;
-      })
-      .join("");
+                  <div>
+
+                    <strong>
+                      ${esc(c.full_name)}
+                    </strong>
+
+                    <span>
+                      ${esc(c.phone || "")}
+                    </span>
+
+                    <small>
+                      Roční servis
+                      ${fmtDate(
+                        c.annual_service_due
+                      )}
+                      —
+                      <b>${when}</b>
+                    </small>
+
+                  </div>
+
+                  <button
+                    class="primary"
+                    data-open-customer="${c.id}"
+                  >
+                    Otevřít
+                  </button>
+
+                </div>
+              `;
+            })
+            .join("")
+        : "<p class='muted'>Žádný servis není do 14 dní.</p>";
+  }
+
+  if ($("stats")) {
+    $("stats").innerHTML = `
+      <div class="stat">
+        <span>Zákazníků</span>
+        <b>${customers.length}</b>
+      </div>
+
+      <div class="stat">
+        <span>Naplánováno</span>
+        <b>
+          ${
+            customers.filter(
+              c =>
+                c.status ===
+                "Naplánováno"
+            ).length
+          }
+        </b>
+      </div>
+
+      <div class="stat">
+        <span>Roční servis</span>
+        <b>
+          ${
+            customers.filter(
+              c =>
+                c.annual_service_due
+            ).length
+          }
+        </b>
+      </div>
+    `;
+  }
 }
 
-/* =========================================================
-   NOVÝ ZÁKAZNÍK
-   ========================================================= */
+function renderCustomers() {
+  const search =
+    $("customerSearch")
+      ?.value
+      .toLowerCase()
+      .trim() || "";
 
-async function createCustomer() {
-  if (!currentUser) return;
+  const list =
+    customers.filter(c =>
+      [
+        c.full_name,
+        c.phone,
+        c.email,
+        c.address,
+        c.problem
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(search)
+    );
 
-  const fullName =
-    $("customerName").value.trim();
-
-  const phone =
-    $("customerPhone").value.trim();
-
-  const email =
-    $("customerEmail").value.trim();
-
-  const address =
-    $("customerAddress").value.trim();
-
-  const problem =
-    $("customerProblem").value.trim();
-
-  const appointment =
-    $("customerAppointment").value;
-
-  if (!fullName) {
-    toast("Vyplň jméno zákazníka.");
+  if (!$("customerList")) {
     return;
   }
 
-  const { data, error } =
-    await sb
-      .from("customers")
-      .insert({
-        user_id:
-          currentUser.id,
+  $("customerList").innerHTML =
+    list.length
+      ? list
+          .map(
+            c => `
+              <div class="customer-card">
 
-        full_name:
-          fullName,
+                <div>
 
-        phone,
+                  <h3>
+                    ${esc(c.full_name)}
+                  </h3>
 
-        email,
+                  <p>
+                    ${esc(c.phone || "")}
+                    ${esc(c.address || "")}
+                  </p>
 
-        address,
+                  <small>
 
-        problem,
+                    ${esc(
+                      c.status || ""
+                    )}
 
-        appointment_at:
-          appointment || null,
+                    ${
+                      c.appointment_at
+                        ? ` · servis ${fmtDate(
+                            c.appointment_at,
+                            true
+                          )}`
+                        : ""
+                    }
 
-        status:
-          "Nový",
+                    ${
+                      c.annual_service_due
+                        ? ` · roční servis ${fmtDate(
+                            c.annual_service_due
+                          )}`
+                        : ""
+                    }
 
-        completed_at:
-          null,
+                  </small>
 
-        annual_service_due:
-          null
-      })
-      .select()
-      .single();
+                </div>
 
-  if (error) {
-    console.error(
-      "CHYBA VYTVOŘENÍ ZÁKAZNÍKA:",
-      error
-    );
+                <button
+                  class="primary"
+                  data-open-customer="${c.id}"
+                >
+                  Detail
+                </button>
 
-    toast(
-      `Zákazníka se nepodařilo vytvořit: ${error.message}`
-    );
-
-    return;
-  }
-
-  customers.unshift(data);
-
-  if ($("customerName")) {
-    $("customerName").value = "";
-  }
-
-  if ($("customerPhone")) {
-    $("customerPhone").value = "";
-  }
-
-  if ($("customerEmail")) {
-    $("customerEmail").value = "";
-  }
-
-  if ($("customerAddress")) {
-    $("customerAddress").value = "";
-  }
-
-  if ($("customerProblem")) {
-    $("customerProblem").value = "";
-  }
-
-  if ($("customerAppointment")) {
-    $("customerAppointment").value = "";
-  }
-
-  toast("Zákazník byl uložen.");
-
-  renderCustomers();
-  renderUpcomingServices();
-
-  showView("customersView");
+              </div>
+            `
+          )
+          .join("")
+      : "<p class='muted'>Žádný zákazník.</p>";
 }
+
 
 /* =========================================================
    DETAIL ZÁKAZNÍKA
    ========================================================= */
 
-async function openCustomer(id) {
-  const customer =
-    customers.find(
-      item =>
-        String(item.id) ===
-        String(id)
-    );
+function renderDetail() {
+  const c =
+    currentCustomer;
 
-  if (!customer) {
-    toast(
-      "Zákazníka se nepodařilo najít."
-    );
-
-    return;
-  }
-
-  currentCustomer = customer;
+  if (!c) return;
 
   if ($("detailTitle")) {
     $("detailTitle").textContent =
-      customer.full_name || "Zákazník";
+      c.full_name;
+  }
+
+  if ($("detailStatus")) {
+    $("detailStatus").innerHTML = `
+      <span class="status ${
+        c.status === "Dokončeno"
+          ? "done"
+          : "planned"
+      }">
+        ${esc(
+          c.status ||
+          "Naplánováno"
+        )}
+      </span>
+    `;
   }
 
   if ($("detailPhone")) {
     $("detailPhone").textContent =
-      customer.phone || "—";
+      c.phone || "—";
 
     $("detailPhone").href =
-      customer.phone
-        ? `tel:${customer.phone}`
+      c.phone
+        ? `tel:${c.phone}`
         : "#";
   }
 
   if ($("detailEmail")) {
     $("detailEmail").textContent =
-      customer.email || "—";
+      c.email || "—";
 
     $("detailEmail").href =
-      customer.email
-        ? `mailto:${customer.email}`
+      c.email
+        ? `mailto:${c.email}`
         : "#";
   }
 
   if ($("detailAddress")) {
     $("detailAddress").textContent =
-      customer.address || "—";
+      c.address || "—";
   }
 
   if ($("detailProblem")) {
     $("detailProblem").textContent =
-      customer.problem || "—";
+      c.problem || "—";
   }
 
   if ($("detailAppointment")) {
     $("detailAppointment").textContent =
-      formatDateTime(
-        customer.appointment_at
+      fmtDate(
+        c.appointment_at,
+        true
       );
   }
 
   if ($("detailAnnual")) {
     $("detailAnnual").textContent =
-      formatDate(
-        customer.annual_service_due
+      fmtDate(
+        c.annual_service_due
       );
   }
 
-  if ($("detailStatus")) {
-    $("detailStatus").textContent =
-      customer.status || "—";
+  if ($("completeBtn")) {
+    $("completeBtn").classList.toggle(
+      "hidden",
+      ![
+        "Naplánováno",
+        "V řešení"
+      ].includes(c.status)
+    );
   }
 
-  if ($("editPhone")) {
-    $("editPhone").value =
-      customer.phone || "";
+  if ($("saveDetailBtn")) {
+    $("saveDetailBtn").textContent =
+      "Upravit zákazníka";
   }
 
-  if ($("editEmail")) {
-    $("editEmail").value =
-      customer.email || "";
+  renderNotes();
+}
+
+async function openCustomer(id) {
+  const customer =
+    customers.find(
+      c => c.id === id
+    );
+
+  if (!customer) {
+    toast(
+      "Zákazník nebyl nalezen."
+    );
+
+    return;
   }
 
-  if ($("editAddress")) {
-    $("editAddress").value =
-      customer.address || "";
-  }
+  currentCustomer =
+    customer;
 
-  if ($("editProblem")) {
-    $("editProblem").value =
-      customer.problem || "";
-  }
-
-  if ($("editAppointment")) {
-    $("editAppointment").value =
-      customer.appointment_at
-        ? customer.appointment_at.slice(
-            0,
-            16
-          )
-        : "";
-  }
+  renderDetail();
 
   showView("detailView");
 
   await renderGallery();
 }
 
-/* =========================================================
-   ULOŽENÍ ZMĚN
-   ========================================================= */
-
-async function saveCustomerDetail() {
-  if (
-    !currentUser ||
-    !currentCustomer
-  ) {
+async function editCustomer() {
+  if (!currentCustomer) {
     return;
   }
 
-  const updates = {
+  const fullName =
+    prompt(
+      "Jméno a příjmení:",
+      currentCustomer.full_name || ""
+    );
+
+  if (fullName === null) return;
+
+  const phone =
+    prompt(
+      "Telefon:",
+      currentCustomer.phone || ""
+    );
+
+  if (phone === null) return;
+
+  const email =
+    prompt(
+      "E-mail:",
+      currentCustomer.email || ""
+    );
+
+  if (email === null) return;
+
+  const address =
+    prompt(
+      "Adresa:",
+      currentCustomer.address || ""
+    );
+
+  if (address === null) return;
+
+  const problem =
+    prompt(
+      "Popis problému:",
+      currentCustomer.problem || ""
+    );
+
+  if (problem === null) return;
+
+  const {
+    data,
+    error
+  } = await sb
+    .from("customers")
+    .update({
+      full_name:
+        fullName.trim(),
+
+      phone:
+        phone.trim(),
+
+      email:
+        email.trim(),
+
+      address:
+        address.trim(),
+
+      problem:
+        problem.trim()
+    })
+    .eq(
+      "id",
+      currentCustomer.id
+    )
+    .eq(
+      "user_id",
+      currentUser.id
+    )
+    .select()
+    .single();
+
+  if (error) {
+    toast(error.message);
+    return;
+  }
+
+  currentCustomer =
+    data;
+
+  customers =
+    customers.map(c =>
+      c.id === data.id
+        ? data
+        : c
+    );
+
+  renderHome();
+  renderCustomers();
+  renderDetail();
+
+  toast(
+    "Zákazník uložen."
+  );
+}
+
+
+/* =========================================================
+   NOVÝ ZÁKAZNÍK
+   ========================================================= */
+
+async function createCustomer(e) {
+  e.preventDefault();
+
+  if (!currentUser) {
+    toast(
+      "Nejste přihlášen."
+    );
+
+    return;
+  }
+
+  const fullName =
+    $("fullName")
+      ?.value
+      .trim();
+
+  if (!fullName) {
+    toast(
+      "Vyplňte jméno zákazníka."
+    );
+
+    return;
+  }
+
+  const appointmentValue =
+    $("appointmentAt")
+      ?.value || "";
+
+  const payload = {
+    user_id:
+      currentUser.id,
+
+    full_name:
+      fullName,
+
     phone:
-      $("editPhone")?.value.trim() ||
-      "",
+      $("phone")
+        ?.value
+        .trim() || "",
 
     email:
-      $("editEmail")?.value.trim() ||
-      "",
+      $("email")
+        ?.value
+        .trim() || "",
 
     address:
-      $("editAddress")?.value.trim() ||
-      "",
+      $("address")
+        ?.value
+        .trim() || "",
 
     problem:
-      $("editProblem")?.value.trim() ||
-      "",
+      $("problem")
+        ?.value
+        .trim() || "",
 
     appointment_at:
-      $("editAppointment")?.value ||
+      appointmentValue
+        ? new Date(
+            appointmentValue
+          ).toISOString()
+        : null,
+
+    status:
+      "Naplánováno",
+
+    completed_at:
+      null,
+
+    annual_service_due:
       null
   };
 
-  const { data, error } =
-    await sb
-      .from("customers")
-      .update(updates)
-      .eq(
-        "id",
-        currentCustomer.id
-      )
-      .eq(
-        "user_id",
-        currentUser.id
-      )
-      .select()
-      .single();
+  const {
+    data,
+    error
+  } = await sb
+    .from("customers")
+    .insert(payload)
+    .select()
+    .single();
 
   if (error) {
+    console.error(error);
+
     toast(
-      `Změny se nepodařilo uložit: ${error.message}`
+      `Zákazník se nepodařil uložit: ${error.message}`
     );
 
     return;
   }
 
-  currentCustomer = data;
+  customers = [
+    data,
+    ...customers.filter(
+      c =>
+        c.id !== data.id
+    )
+  ];
 
-  customers =
-    customers.map(customer =>
-      String(customer.id) ===
-      String(data.id)
-        ? data
-        : customer
-    );
+  if ($("customerForm")) {
+    $("customerForm").reset();
+  }
 
-  await openCustomer(data.id);
+  currentCustomer =
+    data;
 
-  toast("Změny byly uloženy.");
+  renderHome();
+  renderCustomers();
+  renderDetail();
+
+  showView(
+    "detailView"
+  );
+
+  await renderGallery();
+
+  toast(
+    "Zákazník uložen."
+  );
 }
 
+
 /* =========================================================
-   DOKONČENÍ OPRAVY → ROČNÍ SERVIS
+   DOKONČENÍ OPRAVY
+   → DALŠÍ ROČNÍ SERVIS
    ========================================================= */
 
 async function completeRepair() {
   if (
-    !currentUser ||
-    !currentCustomer
+    !currentCustomer ||
+    !currentUser
   ) {
     return;
   }
 
-  const today =
-    new Date();
-
-  const annual =
-    new Date(
-      today.getFullYear() + 1,
-      today.getMonth(),
-      today.getDate()
-    );
+  const base =
+    currentCustomer
+      .appointment_at
+      ? new Date(
+          currentCustomer
+            .appointment_at
+        )
+      : new Date();
 
   const annualDate =
-    annual.toISOString();
+    nextAnnualDate(base);
 
-  const { data, error } =
-    await sb
-      .from("customers")
-      .update({
-        status:
-          "Dokončeno",
-
-        completed_at:
-          new Date().toISOString(),
-
-        annual_service_due:
-          annualDate
-      })
-      .eq(
-        "id",
-        currentCustomer.id
-      )
-      .eq(
-        "user_id",
-        currentUser.id
-      )
-      .select()
-      .single();
-
-  if (error) {
-    toast(
-      `Opravu se nepodařilo dokončit: ${error.message}`
+  const confirmed =
+    confirm(
+      `Oprava zákazníka ${currentCustomer.full_name} bude dokončena.\n\n`
+      +
+      `Další roční servis bude naplánován na ${fmtDate(annualDate)}.\n\n`
+      +
+      `14 dní před termínem se zobrazí upozornění.`
     );
 
+  if (!confirmed) {
     return;
   }
 
-  currentCustomer = data;
+  const {
+    data,
+    error
+  } = await sb
+    .from("customers")
+    .update({
+      status:
+        "Dokončeno",
+
+      completed_at:
+        new Date().toISOString(),
+
+      annual_service_due:
+        annualDate
+    })
+    .eq(
+      "id",
+      currentCustomer.id
+    )
+    .eq(
+      "user_id",
+      currentUser.id
+    )
+    .select()
+    .single();
+
+  if (error) {
+    toast(error.message);
+    return;
+  }
+
+  currentCustomer =
+    data;
 
   customers =
-    customers.map(customer =>
-      String(customer.id) ===
-      String(data.id)
+    customers.map(c =>
+      c.id === data.id
         ? data
-        : customer
+        : c
     );
 
-  await openCustomer(data.id);
-
-  renderUpcomingServices();
+  renderHome();
+  renderCustomers();
+  renderDetail();
 
   toast(
-    `Oprava dokončena. Roční servis je naplánovaný na ${formatDate(annualDate)}.`
+    `Hotovo. Další servis: ${fmtDate(
+      annualDate
+    )}.`
   );
 }
+
 
 /* =========================================================
    SMAZÁNÍ ZÁKAZNÍKA
@@ -749,252 +965,456 @@ async function completeRepair() {
 
 async function deleteCustomer() {
   if (
-    !currentUser ||
-    !currentCustomer
+    !currentCustomer ||
+    !currentUser
   ) {
     return;
   }
 
-  const confirmed =
-    confirm(
-      `Opravdu chceš smazat zákazníka "${currentCustomer.full_name}"?`
+  const name =
+    currentCustomer.full_name;
+
+  if (
+    !confirm(
+      `Opravdu smazat zákazníka ${name}?\n\n`
+      +
+      `Smažou se také jeho fotky a poznámky.`
+    )
+  ) {
+    return;
+  }
+
+  const customerId =
+    currentCustomer.id;
+
+  const {
+    data: photos,
+    error: photoListError
+  } = await sb
+    .from("photos")
+    .select("path")
+    .eq(
+      "customer_id",
+      customerId
+    )
+    .eq(
+      "user_id",
+      currentUser.id
     );
 
-  if (!confirmed) return;
+  if (photoListError) {
+    toast(
+      photoListError.message
+    );
 
-  const { data: photos } =
-    await sb
-      .from("photos")
-      .select("path")
-      .eq(
-        "customer_id",
-        currentCustomer.id
-      );
+    return;
+  }
 
   if (photos?.length) {
-    const paths =
-      photos
-        .map(photo => photo.path)
-        .filter(Boolean);
-
-    if (paths.length) {
+    const {
+      error
+    } =
       await sb.storage
-        .from(PHOTO_BUCKET)
-        .remove(paths);
+        .from(
+          PHOTO_BUCKET
+        )
+        .remove(
+          photos.map(
+            p => p.path
+          )
+        );
+
+    if (error) {
+      console.warn(
+        "Storage delete:",
+        error
+      );
     }
   }
 
-  await sb
+  const {
+    error: photosDeleteError
+  } = await sb
     .from("photos")
     .delete()
     .eq(
       "customer_id",
-      currentCustomer.id
+      customerId
+    )
+    .eq(
+      "user_id",
+      currentUser.id
     );
 
-  const { error } =
-    await sb
-      .from("customers")
-      .delete()
-      .eq(
-        "id",
-        currentCustomer.id
-      )
-      .eq(
-        "user_id",
-        currentUser.id
-      );
+  if (photosDeleteError) {
+    toast(
+      photosDeleteError.message
+    );
+
+    return;
+  }
+
+  const {
+    error
+  } = await sb
+    .from("customers")
+    .delete()
+    .eq(
+      "id",
+      customerId
+    )
+    .eq(
+      "user_id",
+      currentUser.id
+    );
 
   if (error) {
-    toast(
-      `Zákazníka se nepodařilo smazat: ${error.message}`
-    );
-
+    toast(error.message);
     return;
   }
 
   customers =
     customers.filter(
-      customer =>
-        String(customer.id) !==
-        String(currentCustomer.id)
+      c =>
+        c.id !==
+        customerId
     );
 
-  currentCustomer = null;
+  currentCustomer =
+    null;
 
+  renderHome();
   renderCustomers();
-  renderUpcomingServices();
 
-  showView("customersView");
+  showView(
+    "customersView"
+  );
 
-  toast("Zákazník byl smazán.");
+  toast(
+    "Zákazník byl smazán."
+  );
 }
 
+
 /* =========================================================
-   KOMPRESNÍ FOTKY
+   POZNÁMKY
    ========================================================= */
 
-async function compressImage(file) {
-  const image =
-    new Image();
+async function renderNotes() {
+  if (
+    !currentCustomer ||
+    !$("notesBox")
+  ) {
+    return;
+  }
 
-  const url =
-    URL.createObjectURL(file);
+  $("notesBox").value =
+    currentCustomer.notes ||
+    "";
+}
 
-  try {
-    await new Promise(
-      (resolve, reject) => {
-        image.onload =
-          resolve;
+async function saveNotes() {
+  if (
+    !currentCustomer ||
+    !currentUser
+  ) {
+    return;
+  }
 
-        image.onerror =
-          reject;
+  const notes =
+    $("notesBox")
+      ?.value || "";
 
-        image.src = url;
-      }
+  const {
+    data,
+    error
+  } = await sb
+    .from("customers")
+    .update({
+      notes
+    })
+    .eq(
+      "id",
+      currentCustomer.id
+    )
+    .eq(
+      "user_id",
+      currentUser.id
+    )
+    .select()
+    .single();
+
+  if (error) {
+    toast(
+      "Poznámky nelze uložit. Spusť dodané SQL v Supabase."
     );
 
-    const maxSize = 1600;
+    console.error(error);
 
-    let width =
-      image.naturalWidth;
+    return;
+  }
 
-    let height =
-      image.naturalHeight;
+  currentCustomer =
+    data;
+
+  customers =
+    customers.map(c =>
+      c.id === data.id
+        ? data
+        : c
+    );
+
+  toast(
+    "Poznámky uloženy."
+  );
+}
+
+
+/* =========================================================
+   FOTKY
+   ========================================================= */
+
+function loadImage(file) {
+  return new Promise(
+    (resolve, reject) => {
+      const url =
+        URL.createObjectURL(
+          file
+        );
+
+      const img =
+        new Image();
+
+      img.onload = () => {
+        URL.revokeObjectURL(
+          url
+        );
+
+        resolve(img);
+      };
+
+      img.onerror = () => {
+        URL.revokeObjectURL(
+          url
+        );
+
+        reject(
+          new Error(
+            "Fotku nelze načíst."
+          )
+        );
+      };
+
+      img.src = url;
+    }
+  );
+}
+
+function blobFromCanvas(
+  canvas,
+  quality
+) {
+  return new Promise(
+    resolve =>
+      canvas.toBlob(
+        resolve,
+        "image/jpeg",
+        quality
+      )
+  );
+}
+
+async function compressImage(
+  file
+) {
+  const img =
+    await loadImage(file);
+
+  let width =
+    img.naturalWidth;
+
+  let height =
+    img.naturalHeight;
+
+  const maxSide =
+    1600;
+
+  const scale =
+    Math.min(
+      1,
+      maxSide /
+        Math.max(
+          width,
+          height
+        )
+    );
+
+  width =
+    Math.max(
+      1,
+      Math.round(
+        width * scale
+      )
+    );
+
+  height =
+    Math.max(
+      1,
+      Math.round(
+        height * scale
+      )
+    );
+
+  const canvas =
+    document.createElement(
+      "canvas"
+    );
+
+  const ctx =
+    canvas.getContext(
+      "2d"
+    );
+
+  canvas.width =
+    width;
+
+  canvas.height =
+    height;
+
+  ctx.drawImage(
+    img,
+    0,
+    0,
+    width,
+    height
+  );
+
+  let quality =
+    0.82;
+
+  let blob =
+    await blobFromCanvas(
+      canvas,
+      quality
+    );
+
+  for (
+    let i = 0;
+    i < 8 &&
+    blob &&
+    blob.size > TARGET_BYTES;
+    i++
+  ) {
+    quality -= 0.07;
 
     if (
-      width > maxSize ||
-      height > maxSize
+      quality < 0.25
     ) {
-      const ratio =
-        Math.min(
-          maxSize / width,
-          maxSize / height
-        );
-
-      width =
-        Math.round(
-          width * ratio
-        );
-
-      height =
-        Math.round(
-          height * ratio
-        );
+      break;
     }
 
-    const canvas =
-      document.createElement(
-        "canvas"
+    blob =
+      await blobFromCanvas(
+        canvas,
+        quality
+      );
+  }
+
+  if (!blob) {
+    throw new Error(
+      "Fotku se nepodařilo zpracovat."
+    );
+  }
+
+  if (
+    blob.size >
+    TARGET_BYTES
+  ) {
+    const ratio =
+      Math.sqrt(
+        TARGET_BYTES /
+          blob.size
+      ) * 0.92;
+
+    width =
+      Math.max(
+        640,
+        Math.round(
+          width * ratio
+        )
       );
 
-    canvas.width = width;
-    canvas.height = height;
+    height =
+      Math.max(
+        480,
+        Math.round(
+          height * ratio
+        )
+      );
 
-    const ctx =
-      canvas.getContext("2d");
+    canvas.width =
+      width;
+
+    canvas.height =
+      height;
 
     ctx.drawImage(
-      image,
+      img,
       0,
       0,
       width,
       height
     );
 
-    let quality = 0.8;
-
-    let blob =
-      await new Promise(
-        resolve =>
-          canvas.toBlob(
-            resolve,
-            "image/jpeg",
-            quality
-          )
+    blob =
+      await blobFromCanvas(
+        canvas,
+        0.72
       );
-
-    while (
-      blob &&
-      blob.size > TARGET_BYTES &&
-      quality > 0.35
-    ) {
-      quality -= 0.1;
-
-      blob =
-        await new Promise(
-          resolve =>
-            canvas.toBlob(
-              resolve,
-              "image/jpeg",
-              quality
-            )
-        );
-    }
-
-    if (!blob) {
-      throw new Error(
-        "Fotku se nepodařilo zpracovat."
-      );
-    }
-
-    const name =
-      `${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2)}.jpg`;
-
-    return new File(
-      [blob],
-      name,
-      {
-        type: "image/jpeg"
-      }
-    );
-
-  } finally {
-    URL.revokeObjectURL(url);
   }
+
+  return new File(
+    [blob],
+    `${crypto.randomUUID()}.jpg`,
+    {
+      type:
+        "image/jpeg"
+    }
+  );
 }
 
-/* =========================================================
-   NAHRÁVÁNÍ FOTEK
-   ========================================================= */
-
-async function uploadPhotos(files) {
+async function uploadPhotos(
+  files
+) {
   if (
     !currentCustomer ||
+    !currentUser ||
     !files.length
   ) {
     return;
   }
 
-  if (!currentUser) {
-    toast(
-      "Nejsi přihlášen."
-    );
-
-    return;
-  }
-
-  let ok = 0;
+  let uploaded = 0;
 
   for (
-    const original of files
+    const file of files
   ) {
     try {
       const compressed =
         await compressImage(
-          original
+          file
         );
 
       const path =
         `${currentUser.id}/${currentCustomer.id}/${compressed.name}`;
 
       const {
-        error
+        error: uploadError
       } =
         await sb.storage
-          .from(PHOTO_BUCKET)
+          .from(
+            PHOTO_BUCKET
+          )
           .upload(
             path,
             compressed,
@@ -1005,12 +1425,13 @@ async function uploadPhotos(files) {
               cacheControl:
                 "31536000",
 
-              upsert: false
+              upsert:
+                false
             }
           );
 
-      if (error) {
-        throw error;
+      if (uploadError) {
+        throw uploadError;
       }
 
       const {
@@ -1029,16 +1450,21 @@ async function uploadPhotos(files) {
           });
 
       if (dbError) {
+        await sb.storage
+          .from(
+            PHOTO_BUCKET
+          )
+          .remove([
+            path
+          ]);
+
         throw dbError;
       }
 
-      ok++;
+      uploaded++;
 
     } catch (error) {
-      console.error(
-        "CHYBA UPLOADU FOTKY:",
-        error
-      );
+      console.error(error);
 
       toast(
         `Fotku se nepodařilo nahrát: ${error.message}`
@@ -1046,152 +1472,27 @@ async function uploadPhotos(files) {
     }
   }
 
-  if (ok) {
+  if (uploaded) {
     toast(
-      `${ok} fotka/fotek nahráno.`
+      `${uploaded} fotka/fotek nahráno.`
     );
   }
 
   await renderGallery();
 }
 
-/* =========================================================
-   GALERIE FOTEK
-   ========================================================= */
-
-
-
-  const photos = data || [];
-
-  if ($("photoCount")) {
-    $("photoCount").textContent =
-      photos.length;
-  }
-
-  if (!photos.length) {
-    if ($("gallery")) {
-      $("gallery").innerHTML =
-        "<p class='muted'>Zatím zde nejsou žádné fotky.</p>";
-    }
-
+async function renderGallery() {
+  if (
+    !currentCustomer ||
+    !$("gallery")
+  ) {
     return;
   }
 
-  const gallery =
-    $("gallery");
-
-  if (!gallery) return;
-
-  gallery.innerHTML = "";
-
-  for (
-    let index = 0;
-    index < photos.length;
-    index++
-  ) {
-    const photo =
-      photos[index];
-
-    const figure =
-      document.createElement(
-        "figure"
-      );
-
-    try {
-      const {
-        data: signedData,
-        error: signedError
-      } =
-        await sb.storage
-          .from(PHOTO_BUCKET)
-          .createSignedUrl(
-            photo.path,
-            3600
-          );
-
-      if (signedError) {
-        throw signedError;
-      }
-
-      if (
-        !signedData ||
-        !signedData.signedUrl
-      ) {
-        throw new Error(
-          "Supabase nevytvořil odkaz k fotce."
-        );
-      }
-
-      const img =
-        document.createElement(
-          "img"
-        );
-
-      img.loading =
-        "lazy";
-
-      img.src =
-        signedData.signedUrl;
-
-      img.alt =
-        `Fotka okna ${index + 1}`;
-
-      img.style.cursor =
-        "pointer";
-
-      img.addEventListener(
-        "click",
-        () => {
-          window.open(
-            signedData.signedUrl,
-            "_blank"
-          );
-        }
-      );
-
-      img.addEventListener(
-        "error",
-        () => {
-          figure.innerHTML = `
-            <p style="color:#b00020;">
-              Fotku se nepodařilo načíst.
-            </p>
-          `;
-        }
-      );
-
-      figure.appendChild(
-        img
-      );
-
-    } catch (error) {
-      console.error(
-        "CHYBA ZOBRAZENÍ FOTKY:",
-        error
-      );
-
-      figure.innerHTML = `
-        <p style="color:#b00020;">
-          Fotku nelze zobrazit.<br>
-          ${error.message || "Neznámá chyba"}
-        </p>
-      `;
-    }
-
-    gallery.appendChild(
-      figure
-    );
-  }
-}
-
-/* =========================================================
-   SPUŠTĚNÍ APLIKACE
-   ========================================================= */
-
-async function renderGallery() {
-  if (!currentCustomer) return;
-
-  const { data, error } =
+  const {
+    data,
+    error
+  } =
     await sb
       .from("photos")
       .select("*")
@@ -1199,92 +1500,88 @@ async function renderGallery() {
         "customer_id",
         currentCustomer.id
       )
-      .order("created_at", {
-        ascending: false
-      });
+      .eq(
+        "user_id",
+        currentUser.id
+      )
+      .order(
+        "created_at",
+        {
+          ascending:
+            false
+        }
+      );
 
   if (error) {
-    console.error(
-      "CHYBA NAČTENÍ FOTEK:",
-      error
-    );
-
     toast(
-      `Chyba načtení fotek: ${error.message}`
+      `Fotky: ${error.message}`
     );
 
     return;
   }
 
-  const photos = data || [];
+  const photos =
+    data || [];
 
   if ($("photoCount")) {
-    $("photoCount").textContent =
+    $("photoCount")
+      .textContent =
       photos.length;
   }
 
-  const gallery =
-    $("gallery");
-
-  if (!gallery) return;
-
-  gallery.innerHTML = "";
-
   if (!photos.length) {
-    gallery.innerHTML =
+    $("gallery").innerHTML =
       "<p class='muted'>Zatím zde nejsou žádné fotky.</p>";
 
     return;
   }
 
+  $("gallery").innerHTML =
+    "";
+
   for (
-    let index = 0;
-    index < photos.length;
-    index++
+    let i = 0;
+    i < photos.length;
+    i++
   ) {
     const photo =
-      photos[index];
+      photos[i];
+
+    const {
+      data: signed,
+      error: signedError
+    } =
+      await sb.storage
+        .from(
+          PHOTO_BUCKET
+        )
+        .createSignedUrl(
+          photo.path,
+          3600
+        );
 
     const figure =
       document.createElement(
         "figure"
       );
 
-    try {
-      const {
-        data: signedData,
-        error: signedError
-      } =
-        await sb.storage
-          .from(PHOTO_BUCKET)
-          .createSignedUrl(
-            photo.path,
-            3600
-          );
-
-      if (signedError) {
-        throw signedError;
-      }
-
-      if (
-        !signedData ||
-        !signedData.signedUrl
-      ) {
-        throw new Error(
-          "Supabase nevytvořil odkaz k fotce."
-        );
-      }
-
+    if (
+      signedError ||
+      !signed?.signedUrl
+    ) {
+      figure.innerHTML =
+        "<p style='color:#b00020'>Fotku nelze zobrazit.</p>";
+    } else {
       const img =
         document.createElement(
           "img"
         );
 
       img.src =
-        signedData.signedUrl;
+        signed.signedUrl;
 
       img.alt =
-        `Fotka ${index + 1}`;
+        `Fotka ${i + 1}`;
 
       img.loading =
         "lazy";
@@ -1292,50 +1589,88 @@ async function renderGallery() {
       img.style.cursor =
         "pointer";
 
-      img.addEventListener(
-        "click",
-        () => {
-          window.open(
-            signedData.signedUrl,
-            "_blank"
-          );
-        }
-      );
-
-      img.addEventListener(
-        "error",
-        () => {
-          figure.innerHTML =
-            "<p style='color:#b00020;'>Fotku se nepodařilo načíst.</p>";
-        }
-      );
+      img.onclick = () =>
+        window.open(
+          signed.signedUrl,
+          "_blank"
+        );
 
       figure.appendChild(
         img
       );
-
-    } catch (error) {
-      console.error(
-        "CHYBA ZOBRAZENÍ FOTKY:",
-        error
-      );
-
-      figure.innerHTML = `
-        <p style="color:#b00020;">
-          Fotku nelze zobrazit.<br>
-          ${error.message || "Neznámá chyba"}
-        </p>
-      `;
     }
 
-    gallery.appendChild(
-      figure
-    );
+    $("gallery")
+      .appendChild(
+        figure
+      );
   }
 }
 
+
 /* =========================================================
-   KLIKNUTÍ V APLIKACI
+   START APLIKACE
+   ========================================================= */
+
+async function startApp(
+  session
+) {
+  if (!session) {
+    currentUser =
+      null;
+
+    customers = [];
+
+    currentCustomer =
+      null;
+
+    if ($("appView")) {
+      $("appView")
+        .classList
+        .add("hidden");
+    }
+
+    if ($("authView")) {
+      $("authView")
+        .classList
+        .remove("hidden");
+    }
+
+    return;
+  }
+
+  currentUser =
+    session.user;
+
+  if ($("userLabel")) {
+    $("userLabel")
+      .textContent =
+      currentUser.email ||
+      "";
+  }
+
+  if ($("authView")) {
+    $("authView")
+      .classList
+      .add("hidden");
+  }
+
+  if ($("appView")) {
+    $("appView")
+      .classList
+      .remove("hidden");
+  }
+
+  await loadCustomers();
+
+  showView(
+    "homeView"
+  );
+}
+
+
+/* =========================================================
+   EVENTY
    ========================================================= */
 
 document.addEventListener(
@@ -1349,7 +1684,8 @@ document.addEventListener(
 
     if (authTab) {
       setAuthMode(
-        authTab.dataset.authTab
+        authTab.dataset
+          .authTab
       );
 
       return;
@@ -1362,7 +1698,8 @@ document.addEventListener(
 
     if (open) {
       await openCustomer(
-        open.dataset.openCustomer
+        open.dataset
+          .openCustomer
       );
 
       return;
@@ -1409,45 +1746,7 @@ document.addEventListener(
         "homeView"
       );
 
-      return;
-    }
-
-    if (
-      e.target.closest(
-        "#saveDetailBtn"
-      )
-    ) {
-      await saveCustomerDetail();
-
-      return;
-    }
-
-    if (
-      e.target.closest(
-        "#completeBtn"
-      )
-    ) {
-      await completeRepair();
-
-      return;
-    }
-
-    if (
-      e.target.closest(
-        "#deleteCustomerBtn"
-      )
-    ) {
-      await deleteCustomer();
-
-      return;
-    }
-
-    if (
-      e.target.closest(
-        "#logoutBtn"
-      )
-    ) {
-      await signOut();
+      renderHome();
 
       return;
     }
@@ -1461,166 +1760,160 @@ document.addEventListener(
         "customersView"
       );
 
-      return;
-    }
-
-    if (
-      e.target.closest(
-        "#loginBtn"
-      )
-    ) {
-      await signIn();
-
-      return;
-    }
-
-    if (
-      e.target.closest(
-        "#registerBtn"
-      )
-    ) {
-      await signUp();
-
-      return;
-    }
-
-    if (
-      e.target.closest(
-        "#createCustomerBtn"
-      )
-    ) {
-      await createCustomer();
+      renderCustomers();
 
       return;
     }
   }
 );
 
-/* =========================================================
-   FOTKY
-   ========================================================= */
-
-document.addEventListener(
-  "change",
-  async e => {
-
-    if (
-      e.target.matches(
-        "#photoInput"
-      )
-    ) {
-      const files =
-        Array.from(
-          e.target.files || []
-        );
-
-      if (!files.length) {
-        return;
-      }
-
-      await uploadPhotos(
-        files
-      );
-
-      e.target.value = "";
-    }
-  }
-);
 
 /* =========================================================
-   REALTIME
+   FORMULÁŘE A TLAČÍTKA
    ========================================================= */
 
-function subscribeRealtime() {
-  if (!currentUser) return;
-
-  sb
-    .channel(
-      `customers-${currentUser.id}`
-    )
-    .on(
-      "postgres_changes",
-      {
-        event: "*",
-        schema: "public",
-        table: "customers",
-        filter:
-          `user_id=eq.${currentUser.id}`
-      },
-      async () => {
-        await loadCustomers();
+if ($("authForm")) {
+  $("authForm")
+    .addEventListener(
+      "submit",
+      e => {
+        e.preventDefault();
 
         if (
-          currentCustomer
+          authMode ===
+          "login"
         ) {
-          const updated =
-            customers.find(
-              customer =>
-                String(
-                  customer.id
-                ) ===
-                String(
-                  currentCustomer.id
-                )
-            );
-
-          if (updated) {
-            currentCustomer =
-              updated;
-
-            await openCustomer(
-              updated.id
-            );
-          }
+          signIn();
+        } else {
+          signUp();
         }
       }
-    )
-    .subscribe();
+    );
 }
 
+if ($("logoutBtn")) {
+  $("logoutBtn")
+    .addEventListener(
+      "click",
+      logout
+    );
+}
+
+if ($("customerForm")) {
+  $("customerForm")
+    .addEventListener(
+      "submit",
+      createCustomer
+    );
+}
+
+if ($("customerSearch")) {
+  $("customerSearch")
+    .addEventListener(
+      "input",
+      renderCustomers
+    );
+}
+
+if ($("photoInput")) {
+  $("photoInput")
+    .addEventListener(
+      "change",
+      async e => {
+
+        const files =
+          [
+            ...e.target.files
+          ];
+
+        e.target.value =
+          "";
+
+        await uploadPhotos(
+          files
+        );
+      }
+    );
+}
+
+if ($("completeBtn")) {
+  $("completeBtn")
+    .addEventListener(
+      "click",
+      completeRepair
+    );
+}
+
+if ($("saveDetailBtn")) {
+  $("saveDetailBtn")
+    .addEventListener(
+      "click",
+      editCustomer
+    );
+}
+
+if ($("deleteCustomerBtn")) {
+  $("deleteCustomerBtn")
+    .addEventListener(
+      "click",
+      deleteCustomer
+    );
+}
+
+if ($("saveNotesBtn")) {
+  $("saveNotesBtn")
+    .addEventListener(
+      "click",
+      saveNotes
+    );
+}
+
+
 /* =========================================================
-   AUTH STAV
+   SPUŠTĚNÍ APLIKACE
    ========================================================= */
 
-setAuthMode("login");
+setAuthMode(
+  "login"
+);
 
-async function initApp() {
-  // Nejprve zjistíme, jestli už existuje přihlášená relace
+sb.auth.onAuthStateChange(
+  (event, session) => {
+
+    if (
+      event ===
+      "SIGNED_OUT"
+    ) {
+      startApp(
+        null
+      );
+    }
+  }
+);
+
+(async function boot() {
+
   const {
-    data: { session }
-  } = await sb.auth.getSession();
+    data,
+    error
+  } =
+    await sb.auth
+      .getSession();
 
-  if (session) {
-    startApp(session);
-  } else {
-    startApp(null);
+  if (error) {
+    console.error(
+      error
+    );
+
+    toast(
+      `Chyba přihlášení: ${error.message}`
+    );
+
+    return;
   }
 
-  // Změny přihlášení pouze zachytíme.
-  // Nenecháváme Auth callback čekat na načítání databáze.
-  sb.auth.onAuthStateChange(
-    (_event, newSession) => {
-      setTimeout(() => {
-        startApp(newSession);
-      }, 0);
-    }
-  );
-}
-
-initApp();
-/* =========================================================
-   START
-   ========================================================= */
-
-(async function init() {
-  const {
-    data: {
-      session
-    }
-  } =
-    await sb.auth.getSession();
-
   await startApp(
-    session
+    data.session
   );
+
 })();
