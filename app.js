@@ -1220,65 +1220,149 @@ async function uploadPhotos(files) {
    SPUŠTĚNÍ APLIKACE
    ========================================================= */
 
-async function startApp(session) {
-  if (!session) {
-    currentUser = null;
-    customers = [];
-    currentCustomer = null;
-    appStarted = false;
+async function renderGallery() {
+  if (!currentCustomer) return;
 
-    if ($("appView")) {
-      $("appView").classList.add(
-        "hidden"
-      );
-    }
+  const { data, error } =
+    await sb
+      .from("photos")
+      .select("*")
+      .eq(
+        "customer_id",
+        currentCustomer.id
+      )
+      .order("created_at", {
+        ascending: false
+      });
 
-    if ($("authView")) {
-      $("authView").classList.remove(
-        "hidden"
-      );
-    }
+  if (error) {
+    console.error(
+      "CHYBA NAČTENÍ FOTEK:",
+      error
+    );
+
+    toast(
+      `Chyba načtení fotek: ${error.message}`
+    );
 
     return;
   }
 
-  currentUser =
-    session.user;
+  const photos = data || [];
 
-  if ($("userLabel")) {
-    $("userLabel").textContent =
-      currentUser.email || "";
+  if ($("photoCount")) {
+    $("photoCount").textContent =
+      photos.length;
   }
 
-  if ($("authView")) {
-    $("authView").classList.add(
-      "hidden"
-    );
+  const gallery =
+    $("gallery");
+
+  if (!gallery) return;
+
+  gallery.innerHTML = "";
+
+  if (!photos.length) {
+    gallery.innerHTML =
+      "<p class='muted'>Zatím zde nejsou žádné fotky.</p>";
+
+    return;
   }
 
-  if ($("appView")) {
-    $("appView").classList.remove(
-      "hidden"
-    );
-  }
-
-  await loadCustomers();
-
-  if (!appStarted) {
-    subscribeRealtime();
-    appStarted = true;
-  }
-
-  showView(
-    "homeView"
-  );
-
-  if (
-    "serviceWorker" in navigator
+  for (
+    let index = 0;
+    index < photos.length;
+    index++
   ) {
-    navigator.serviceWorker
-      .register("/sw.js")
-      .catch(console.warn);
+    const photo =
+      photos[index];
+
+    const figure =
+      document.createElement(
+        "figure"
+      );
+
+    try {
+      const {
+        data: signedData,
+        error: signedError
+      } =
+        await sb.storage
+          .from(PHOTO_BUCKET)
+          .createSignedUrl(
+            photo.path,
+            3600
+          );
+
+      if (signedError) {
+        throw signedError;
+      }
+
+      if (
+        !signedData ||
+        !signedData.signedUrl
+      ) {
+        throw new Error(
+          "Supabase nevytvořil odkaz k fotce."
+        );
+      }
+
+      const img =
+        document.createElement(
+          "img"
+        );
+
+      img.src =
+        signedData.signedUrl;
+
+      img.alt =
+        `Fotka ${index + 1}`;
+
+      img.loading =
+        "lazy";
+
+      img.style.cursor =
+        "pointer";
+
+      img.addEventListener(
+        "click",
+        () => {
+          window.open(
+            signedData.signedUrl,
+            "_blank"
+          );
+        }
+      );
+
+      img.addEventListener(
+        "error",
+        () => {
+          figure.innerHTML =
+            "<p style='color:#b00020;'>Fotku se nepodařilo načíst.</p>";
+        }
+      );
+
+      figure.appendChild(
+        img
+      );
+
+    } catch (error) {
+      console.error(
+        "CHYBA ZOBRAZENÍ FOTKY:",
+        error
+      );
+
+      figure.innerHTML = `
+        <p style="color:#b00020;">
+          Fotku nelze zobrazit.<br>
+          ${error.message || "Neznámá chyba"}
+        </p>
+      `;
+    }
+
+    gallery.appendChild(
+      figure
+    );
   }
 }
 
