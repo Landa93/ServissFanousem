@@ -1,5 +1,4 @@
 const CACHE = "servissfanousem-v4";
-
 const ASSETS = [
   "/",
   "/index.html",
