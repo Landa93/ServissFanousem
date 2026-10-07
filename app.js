@@ -142,6 +142,7 @@ function setAuthMode(mode) {
    PŘIHLÁŠENÍ
    ========================================================= */
 
+```js
 async function signIn() {
   const email =
     $("authEmail").value.trim();
@@ -149,69 +150,36 @@ async function signIn() {
   const password =
     $("authPassword").value;
 
-  const { error } =
-    await sb.auth.signInWithPassword({
-      email,
-      password
-    });
+  if (!email || !password) {
+    toast("Vyplň e-mail a heslo.");
+    return;
+  }
+
+  const {
+    data,
+    error
+  } = await sb.auth.signInWithPassword({
+    email,
+    password
+  });
 
   if (error) {
     console.error(
-      "CHYBA PŘIHLÁŠENÍ:",
+      "CHYBA PŘI PŘIHLÁŠENÍ:",
       error
     );
 
-    toast(
-      `Přihlášení se nepodařilo: ${error.message}`
-    );
-
-    return;
-  }
-
-  toast("Přihlášení proběhlo úspěšně.");
-}
-
-async function signUp() {
-  const email =
-    $("authEmail").value.trim();
-
-  const password =
-    $("authPassword").value;
-
-  const { error } =
-    await sb.auth.signUp({
-      email,
-      password
-    });
-
-  if (error) {
-    toast(
-      `Registrace se nepodařila: ${error.message}`
-    );
-
-    return;
-  }
-
-  toast(
-    "Registrace proběhla. Pokud je zapnuté potvrzení e-mailu, zkontroluj e-mail."
-  );
-}
-
-async function signOut() {
-  const { error } =
-    await sb.auth.signOut();
-
-  if (error) {
     toast(error.message);
     return;
   }
 
-  currentUser = null;
-  currentCustomer = null;
-  customers = [];
-
-  showView("authView");
+  // Přihlášení proběhlo.
+  // Použijeme přímo vrácenou session.
+  if (data && data.session) {
+    await startApp(data.session);
+  }
 }
+```
 
 /* =========================================================
    ZÁKAZNÍCI
