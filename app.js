@@ -1,9 +1,11 @@
 /* =========================================================
-   ServisSFanoušem – NOVÁ VERZE
+   ServisSFanoušem
+   Kompletní app.js
    ========================================================= */
 
 const SUPABASE_URL = "https://ujtpluckaenrplkfpzgi.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_5Sf5fpEYUA2Q3dp74c1q3w_XzKRTST7";
+
 const PHOTO_BUCKET = "photos";
 const TARGET_BYTES = 200 * 1024;
 
@@ -22,40 +24,39 @@ const sb = supabase.createClient(
 let currentUser = null;
 let customers = [];
 let currentCustomer = null;
+let realtimeChannel = null;
 let authMode = "login";
+let appStarted = false;
+
+/* =========================================================
+   Pomocné funkce
+   ========================================================= */
 
 const $ = id => document.getElementById(id);
 
-function toast(message) {
-  const el = $("toast");
-
-  if (!el) {
-    alert(message);
-    return;
-  }
-
-  el.textContent = message;
-  el.classList.add("show");
-
-  clearTimeout(window.__toastTimer);
-
-  window.__toastTimer = setTimeout(
-    () => el.classList.remove("show"),
-    3500
-  );
-}
-
-function esc(value) {
-  return String(value ?? "").replace(
+const esc = value =>
+  String(value ?? "").replace(
     /[&<>"']/g,
-    ch => ({
+    m => ({
       "&": "&amp;",
       "<": "&lt;",
       ">": "&gt;",
       '"': "&quot;",
       "'": "&#039;"
-    }[ch])
+    }[m])
   );
+
+function toast(message) {
+  const el = $("toast");
+  if (!el) return;
+
+  el.textContent = message;
+  el.classList.add("show");
+
+  clearTimeout(window.__toast);
+  window.__toast = setTimeout(() => {
+    el.classList.remove("show");
+  }, 3200);
 }
 
 function fmtDate(value, withTime = false) {
@@ -63,62 +64,50 @@ function fmtDate(value, withTime = false) {
 
   const d = new Date(value);
 
-  if (Number.isNaN(d.getTime())) {
-    return "—";
-  }
+  if (Number.isNaN(d.getTime())) return "—";
 
   return new Intl.DateTimeFormat(
     "cs-CZ",
     withTime
-      ? {
-          dateStyle: "medium",
-          timeStyle: "short"
-        }
-      : {
-          dateStyle: "medium"
-        }
+      ? { dateStyle: "medium", timeStyle: "short" }
+      : { dateStyle: "medium" }
   ).format(d);
 }
 
-function daysUntil(value) {
-  if (!value) return 999999;
+function daysUntil(dateValue) {
+  if (!dateValue) return 999999;
 
-  const d = new Date(`${value}T00:00:00`);
+  const d = new Date(dateValue + "T00:00:00");
+
   const now = new Date();
-
-  d.setHours(0, 0, 0, 0);
   now.setHours(0, 0, 0, 0);
 
-  return Math.ceil(
-    (d - now) / 86400000
-  );
+  return Math.ceil((d - now) / 86400000);
 }
 
-function nextAnnualDate(baseDate = new Date()) {
-  const d = new Date(baseDate);
+function nextYearDate() {
+  const d = new Date();
 
-  d.setFullYear(
-    d.getFullYear() + 1
-  );
+  d.setFullYear(d.getFullYear() + 1);
 
   return d.toISOString().slice(0, 10);
 }
 
-function showView(id) {
+function showView(name) {
   [
     "homeView",
     "customersView",
+    "calendarView",
+    "annualServicesView",
+    "doneView",
     "customerFormView",
     "detailView"
-  ].forEach(name => {
-    const el = $(name);
-
-    if (el) {
-      el.classList.add("hidden");
-    }
+  ].forEach(view => {
+    const el = $(view);
+    if (el) el.classList.add("hidden");
   });
 
-  const target = $(id);
+  const target = $(name);
 
   if (target) {
     target.classList.remove("hidden");
@@ -130,9 +119,8 @@ function showView(id) {
   });
 }
 
-
 /* =========================================================
-   PŘIHLÁŠENÍ
+   Přihlášení
    ========================================================= */
 
 function setAuthMode(mode) {
@@ -140,10 +128,10 @@ function setAuthMode(mode) {
 
   document
     .querySelectorAll("[data-auth-tab]")
-    .forEach(btn => {
-      btn.classList.toggle(
+    .forEach(button => {
+      button.classList.toggle(
         "active",
-        btn.dataset.authTab === mode
+        button.dataset.authTab === mode
       );
     });
 
@@ -153,90 +141,57 @@ function setAuthMode(mode) {
         ? "Přihlásit"
         : "Vytvořit účet";
   }
+
+  if ($("authPassword")) {
+    $("authPassword").autocomplete =
+      mode === "login"
+        ? "current-password"
+        : "new-password";
+  }
+
+  if ($("authHint")) {
+    $("authHint").textContent =
+      mode === "login"
+        ? "Přihlášení zůstává uložené v tomto zařízení."
+        : "Vytvoř účet e-mailem a heslem.";
+  }
 }
 
 async function signIn() {
-  const email =
-    $("authEmail")?.value.trim();
+  const email = $("authEmail").value.trim();
+  const password = $("authPassword").value;
 
-  const password =
-    $("authPassword")?.value || "";
-
-  if (!email || !password) {
-    toast("Vyplň e-mail a heslo.");
-    return;
-  }
-
-  const {
-    data,
-    error
-  } = await sb.auth.signInWithPassword({
-    email,
-    password
-  });
+  const { error } =
+    await sb.auth.signInWithPassword({
+      email,
+      password
+    });
 
   if (error) {
-    console.error(error);
-
-    toast(
-      `Přihlášení se nepodařilo: ${error.message}`
-    );
-
-    return;
+    toast(error.message);
   }
-
-  if (!data.session) {
-    toast(
-      "Přihlášení se nepodařilo dokončit."
-    );
-
-    return;
-  }
-
-  await startApp(data.session);
 }
 
 async function signUp() {
-  const email =
-    $("authEmail")?.value.trim();
+  const email = $("authEmail").value.trim();
+  const password = $("authPassword").value;
 
-  const password =
-    $("authPassword")?.value || "";
-
-  if (!email || !password) {
-    toast("Vyplň e-mail a heslo.");
-    return;
-  }
-
-  if (password.length < 6) {
-    toast(
-      "Heslo musí mít alespoň 6 znaků."
-    );
-
-    return;
-  }
-
-  const {
-    data,
-    error
-  } = await sb.auth.signUp({
-    email,
-    password
-  });
+  const { data, error } =
+    await sb.auth.signUp({
+      email,
+      password
+    });
 
   if (error) {
-    toast(
-      `Registrace se nepodařila: ${error.message}`
-    );
-
+    toast(error.message);
     return;
   }
 
   if (data.session) {
-    await startApp(data.session);
+    toast("Účet vytvořen a přihlášen.");
   } else {
     toast(
-      "Účet je vytvořen. Pokud Supabase vyžaduje potvrzení e-mailu, potvrď ho a potom se přihlas."
+      "Účet vytvořen. Potvrď e-mail a potom se přihlas."
     );
   }
 }
@@ -248,85 +203,670 @@ async function logout() {
   customers = [];
   currentCustomer = null;
 
-  if ($("appView")) {
-    $("appView").classList.add("hidden");
+  if (realtimeChannel) {
+    await sb.removeChannel(realtimeChannel);
+    realtimeChannel = null;
   }
 
-  if ($("authView")) {
-    $("authView").classList.remove("hidden");
-  }
-
-  showView("homeView");
+  appStarted = false;
 }
 
-
 /* =========================================================
-   ZÁKAZNÍCI
+   ZÁKAZNÍCI - NAČTENÍ
    ========================================================= */
 
 async function loadCustomers() {
   if (!currentUser) return;
 
-  const {
-    data,
-    error
-  } = await sb
+  const { data, error } = await sb
     .from("customers")
     .select("*")
-    .eq(
-      "user_id",
-      currentUser.id
-    )
-    .order(
-      "created_at",
-      {
-        ascending: false
-      }
-    );
+    .eq("user_id", currentUser.id)
+    .order("created_at", {
+      ascending: false
+    });
 
   if (error) {
-    console.error(error);
-
-    toast(
-      `Chyba zákazníků: ${error.message}`
+    console.error(
+      "CHYBA NAČÍTÁNÍ ZÁKAZNÍKŮ:",
+      error
     );
 
+    toast(error.message);
     return;
   }
 
-  customers = data || [];
+  customers = Array.isArray(data)
+    ? data
+    : [];
+
+  ensureServiceViews();
 
   renderHome();
   renderCustomers();
+  renderDone();
+  renderAnnualServices();
+  renderCalendar();
 
   if (currentCustomer) {
-    const fresh =
-      customers.find(
-        c =>
-          c.id ===
-          currentCustomer.id
-      );
+    const fresh = customers.find(
+      c => c.id === currentCustomer.id
+    );
 
     if (fresh) {
       currentCustomer = fresh;
-
       renderDetail();
     }
   }
 }
 
-function renderHome() {
-  const reminders =
+/* =========================================================
+   REALTIME
+   ========================================================= */
+
+function subscribeRealtime() {
+  if (!currentUser) return;
+
+  if (realtimeChannel) {
+    sb.removeChannel(realtimeChannel);
+  }
+
+  realtimeChannel = sb
+    .channel("customers-live-" + currentUser.id)
+
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "customers",
+        filter: `user_id=eq.${currentUser.id}`
+      },
+      async () => {
+        await loadCustomers();
+      }
+    )
+
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "photos",
+        filter: `user_id=eq.${currentUser.id}`
+      },
+      async () => {
+        if (currentCustomer) {
+          await renderGallery();
+        }
+      }
+    )
+
+    .subscribe();
+}
+
+/* =========================================================
+   SERVISNÍ SEKCE
+   ========================================================= */
+
+const WORK_START_HOUR = 8;
+const WORK_END_HOUR = 17;
+const SERVICE_SLOT_MINUTES = 60;
+
+let calendarDate = new Date();
+let calendarSelectedDate = null;
+
+function dateKeyLocal(date) {
+  const d =
+    date instanceof Date
+      ? date
+      : new Date(date);
+
+  if (Number.isNaN(d.getTime())) {
+    return "";
+  }
+
+  return [
+    d.getFullYear(),
+    String(d.getMonth() + 1).padStart(2, "0"),
+    String(d.getDate()).padStart(2, "0")
+  ].join("-");
+}
+
+function parseAppointment(value) {
+  if (!value) return null;
+
+  const d = new Date(value);
+
+  return Number.isNaN(d.getTime())
+    ? null
+    : d;
+}
+
+function formatTime(value) {
+  const d = parseAppointment(value);
+
+  if (!d) return "—";
+
+  return new Intl.DateTimeFormat(
+    "cs-CZ",
+    {
+      hour: "2-digit",
+      minute: "2-digit"
+    }
+  ).format(d);
+}
+
+function formatDayLong(key) {
+  if (!key) return "";
+
+  const d =
+    new Date(`${key}T12:00:00`);
+
+  return new Intl.DateTimeFormat(
+    "cs-CZ",
+    {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric"
+    }
+  ).format(d);
+}
+
+function addAppStyles() {
+  if ($("servicePlannerStyles")) return;
+
+  const style =
+    document.createElement("style");
+
+  style.id =
+    "servicePlannerStyles";
+
+  style.textContent = `
+    .planner-nav {
+      display:flex;
+      gap:8px;
+      align-items:center;
+      justify-content:space-between;
+      margin:12px 0;
+      flex-wrap:wrap;
+    }
+
+    .planner-month {
+      font-size:1.15rem;
+      font-weight:700;
+      text-transform:capitalize;
+    }
+
+    .calendar-grid {
+      display:grid;
+      grid-template-columns:repeat(7,minmax(0,1fr));
+      gap:6px;
+    }
+
+    .calendar-weekday {
+      text-align:center;
+      font-size:.78rem;
+      font-weight:700;
+      padding:5px 2px;
+      opacity:.7;
+    }
+
+    .calendar-day {
+      min-height:78px;
+      border:1px solid rgba(127,127,127,.22);
+      border-radius:12px;
+      padding:7px;
+      background:var(--card,#fff);
+      cursor:pointer;
+      text-align:left;
+    }
+
+    .calendar-day:hover {
+      transform:translateY(-1px);
+    }
+
+    .calendar-day.empty {
+      opacity:.25;
+      cursor:default;
+    }
+
+    .calendar-day.today {
+      outline:2px solid currentColor;
+    }
+
+    .calendar-day.selected {
+      box-shadow:inset 0 0 0 2px currentColor;
+    }
+
+    .calendar-day-number {
+      font-weight:700;
+    }
+
+    .calendar-count {
+      margin-top:7px;
+      font-size:.72rem;
+      line-height:1.25;
+    }
+
+    .calendar-free {
+      font-size:.72rem;
+      opacity:.75;
+    }
+
+    .appointment-row {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      padding:12px;
+      border:1px solid rgba(127,127,127,.22);
+      border-radius:12px;
+      margin:8px 0;
+    }
+
+    .appointment-time {
+      font-weight:800;
+      min-width:52px;
+    }
+
+    .free-slot {
+      display:inline-block;
+      margin:4px;
+      padding:7px 10px;
+      border-radius:999px;
+      border:1px dashed rgba(80,160,100,.55);
+      cursor:pointer;
+      font-size:.85rem;
+    }
+
+    .done-card {
+      border-left:5px solid #24a148;
+      background:rgba(36,161,72,.08);
+    }
+
+    .done-badge {
+      display:inline-block;
+      color:#16803c;
+      font-weight:800;
+      margin-top:4px;
+    }
+
+    @media (max-width:600px) {
+      .calendar-day {
+        min-height:62px;
+        padding:5px;
+      }
+
+      .calendar-count {
+        font-size:.65rem;
+      }
+
+      .calendar-weekday {
+        font-size:.68rem;
+      }
+    }
+  `;
+
+  document.head.appendChild(style);
+}
+
+/* =========================================================
+   DYNAMICKÉ VIEWS
+   ========================================================= */
+
+function ensureServiceViews() {
+  addAppStyles();
+
+  const appView = $("appView");
+
+  if (!appView) return;
+
+  if (!$("calendarView")) {
+    const el =
+      document.createElement("section");
+
+    el.id = "calendarView";
+    el.className = "view hidden";
+
+    el.innerHTML = `
+      <div class="page-header">
+        <div>
+          <h2>📅 Plánovací kalendář</h2>
+          <p class="muted">
+            Přehled naplánovaných servisů a volných hodin.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          class="secondary"
+          data-back>
+          ← Zpět
+        </button>
+      </div>
+
+      <div class="planner-nav">
+        <button
+          type="button"
+          class="secondary"
+          id="calendarPrev">
+          ←
+        </button>
+
+        <div
+          class="planner-month"
+          id="calendarMonth">
+        </div>
+
+        <button
+          type="button"
+          class="secondary"
+          id="calendarNext">
+          →
+        </button>
+      </div>
+
+      <div id="calendarGrid"></div>
+
+      <div
+        id="calendarDayDetail"
+        style="margin-top:16px">
+      </div>
+    `;
+
+    appView.appendChild(el);
+
+    $("calendarPrev")
+      .addEventListener(
+        "click",
+        () => {
+          calendarDate.setMonth(
+            calendarDate.getMonth() - 1
+          );
+
+          renderCalendar();
+        }
+      );
+
+    $("calendarNext")
+      .addEventListener(
+        "click",
+        () => {
+          calendarDate.setMonth(
+            calendarDate.getMonth() + 1
+          );
+
+          renderCalendar();
+        }
+      );
+  }
+
+  if (!$("annualServicesView")) {
+    const el =
+      document.createElement("section");
+
+    el.id =
+      "annualServicesView";
+
+    el.className =
+      "view hidden";
+
+    el.innerHTML = `
+      <div class="page-header">
+        <div>
+          <h2>🔧 Roční servisy</h2>
+          <p class="muted">
+            Zákazníci ručně převedení do ročního servisu.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          class="secondary"
+          data-back>
+          ← Zpět
+        </button>
+      </div>
+
+      <div id="annualServiceList"></div>
+    `;
+
+    appView.appendChild(el);
+  }
+
+  if (!$("doneView")) {
+    const el =
+      document.createElement("section");
+
+    el.id =
+      "doneView";
+
+    el.className =
+      "view hidden";
+
+    el.innerHTML = `
+      <div class="page-header">
+        <div>
+          <h2>✅ Hotové</h2>
+          <p class="muted">
+            Dokončené opravy a servisy.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          class="secondary"
+          data-back>
+          ← Zpět
+        </button>
+      </div>
+
+      <div id="doneList"></div>
+    `;
+
+    appView.appendChild(el);
+  }
+
+  const home =
+    $("homeView");
+
+  if (
+    home &&
+    !$("serviceNavigation")
+  ) {
+    const nav =
+      document.createElement("div");
+
+    nav.id =
+      "serviceNavigation";
+
+    nav.style.cssText =
+      "display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin:16px 0;";
+
+    nav.innerHTML = `
+      <button
+        type="button"
+        class="primary"
+        id="calendarBtn">
+        📅 Kalendář
+      </button>
+
+      <button
+        type="button"
+        class="primary"
+        id="annualServicesBtn">
+        🔧 Roční servisy
+      </button>
+
+      <button
+        type="button"
+        class="primary"
+        id="doneBtn">
+        ✅ Hotové
+      </button>
+    `;
+
+    const first =
+      home.firstElementChild;
+
+    if (first) {
+      first.insertAdjacentElement(
+        "afterend",
+        nav
+      );
+    } else {
+      home.appendChild(nav);
+    }
+
+    $("calendarBtn")
+      .addEventListener(
+        "click",
+        openCalendar
+      );
+
+    $("annualServicesBtn")
+      .addEventListener(
+        "click",
+        openAnnualServices
+      );
+
+    $("doneBtn")
+      .addEventListener(
+        "click",
+        openDone
+      );
+  }
+}
+
+function activeCustomers() {
+  return customers.filter(
+    c => c.status !== "Dokončeno"
+  );
+}
+
+function completedCustomers() {
+  return customers.filter(
+    c => c.status === "Dokončeno"
+  );
+}
+
+/* =========================================================
+   HOTOVÉ
+   ========================================================= */
+
+function renderDone() {
+  ensureServiceViews();
+
+  const list =
+    $("doneList");
+
+  if (!list) return;
+
+  const done =
+    completedCustomers()
+      .sort((a, b) => {
+        const aa =
+          a.completed_at ||
+          a.updated_at ||
+          "";
+
+        const bb =
+          b.completed_at ||
+          b.updated_at ||
+          "";
+
+        return String(bb)
+          .localeCompare(
+            String(aa)
+          );
+      });
+
+  list.innerHTML =
+    done.length
+      ? done.map(c => `
+          <div class="customer-card done-card">
+            <div>
+              <h3>${esc(c.full_name)}</h3>
+
+              <p>
+                ${esc(c.phone || "")}
+                ${
+                  c.address
+                    ? ` · ${esc(c.address)}`
+                    : ""
+                }
+              </p>
+
+              <span class="done-badge">
+                ✓ Hotové
+              </span>
+
+              <br>
+
+              <small>
+                Dokončeno:
+                ${fmtDate(c.completed_at, true)}
+
+                ${
+                  c.annual_service_due
+                    ? `
+                      · další roční servis:
+                      ${fmtDate(c.annual_service_due)}
+                    `
+                    : ""
+                }
+              </small>
+            </div>
+
+            <button
+              type="button"
+              class="primary"
+              data-open-customer="${c.id}">
+              Otevřít složku
+            </button>
+          </div>
+        `).join("")
+      : `
+          <p class="muted">
+            Zatím není žádný hotový servis.
+          </p>
+        `;
+}
+
+function openDone() {
+  ensureServiceViews();
+
+  renderDone();
+
+  showView("doneView");
+}
+
+/* =========================================================
+   ROČNÍ SERVISY
+   ========================================================= */
+
+function renderAnnualServices() {
+  ensureServiceViews();
+
+  const list =
+    $("annualServiceList");
+
+  if (!list) return;
+
+  /*
+    POZOR:
+    Do této sekce se dostanou pouze zákazníci,
+    kteří byli RUČNĚ převedeni do ročního servisu.
+  */
+
+  const annual =
     customers
       .filter(
         c =>
+          c.status === "Dokončeno" &&
           c.annual_service_due
-      )
-      .filter(
-        c =>
-          daysUntil(
-            c.annual_service_due
-          ) <= 14
       )
       .sort(
         (a, b) =>
@@ -339,22 +879,622 @@ function renderHome() {
           )
       );
 
+  list.innerHTML =
+    annual.length
+      ? annual.map(c => {
+          const days =
+            daysUntil(
+              c.annual_service_due
+            );
+
+          const urgent =
+            days <= 14;
+
+          const label =
+            days < 0
+              ? `po termínu o ${Math.abs(days)} dní`
+              : days === 0
+              ? "servis je dnes"
+              : `za ${days} dní`;
+
+          return `
+            <div
+              class="customer-card ${
+                urgent
+                  ? "done-card"
+                  : ""
+              }">
+
+              <div>
+                <h3>
+                  ${esc(c.full_name)}
+                </h3>
+
+                <p>
+                  ${esc(c.phone || "")}
+                  ${
+                    c.address
+                      ? ` · ${esc(c.address)}`
+                      : ""
+                  }
+                </p>
+
+                <small>
+                  Roční servis:
+                  <b>
+                    ${fmtDate(
+                      c.annual_service_due
+                    )}
+                  </b>
+
+                  ·
+
+                  <b>
+                    ${esc(label)}
+                  </b>
+                </small>
+              </div>
+
+              <button
+                type="button"
+                class="primary"
+                data-open-customer="${c.id}">
+                Otevřít složku
+              </button>
+
+            </div>
+          `;
+        }).join("")
+      : `
+          <p class="muted">
+            Zatím není žádný zákazník převedený
+            do ročního servisu.
+          </p>
+        `;
+}
+
+function openAnnualServices() {
+  ensureServiceViews();
+
+  renderAnnualServices();
+
+  showView(
+    "annualServicesView"
+  );
+}
+
+/* =========================================================
+   KALENDÁŘ
+   ========================================================= */
+
+function renderCalendar() {
+  ensureServiceViews();
+
+  const monthEl =
+    $("calendarMonth");
+
+  const gridEl =
+    $("calendarGrid");
+
+  if (!monthEl || !gridEl) {
+    return;
+  }
+
+  const y =
+    calendarDate.getFullYear();
+
+  const m =
+    calendarDate.getMonth();
+
+  monthEl.textContent =
+    new Intl.DateTimeFormat(
+      "cs-CZ",
+      {
+        month: "long",
+        year: "numeric"
+      }
+    ).format(calendarDate);
+
+  const first =
+    new Date(y, m, 1);
+
+  const daysInMonth =
+    new Date(
+      y,
+      m + 1,
+      0
+    ).getDate();
+
+  const mondayIndex =
+    (first.getDay() + 6) % 7;
+
+  const weekdays = [
+    "Po",
+    "Út",
+    "St",
+    "Čt",
+    "Pá",
+    "So",
+    "Ne"
+  ];
+
+  let html =
+    `<div class="calendar-grid">`;
+
+  html += weekdays
+    .map(
+      d =>
+        `<div class="calendar-weekday">${d}</div>`
+    )
+    .join("");
+
+  for (
+    let i = 0;
+    i < mondayIndex;
+    i++
+  ) {
+    html +=
+      `<div class="calendar-day empty"></div>`;
+  }
+
+  const todayKey =
+    dateKeyLocal(
+      new Date()
+    );
+
+  for (
+    let day = 1;
+    day <= daysInMonth;
+    day++
+  ) {
+    const d =
+      new Date(
+        y,
+        m,
+        day
+      );
+
+    const key =
+      dateKeyLocal(d);
+
+    /*
+      Dokončené servisy už v plánovacím
+      kalendáři nezabíráme.
+    */
+
+    const appointments =
+      customers
+        .filter(
+          c =>
+            c.status !== "Dokončeno" &&
+            c.appointment_at &&
+            dateKeyLocal(
+              new Date(
+                c.appointment_at
+              )
+            ) === key
+        )
+        .sort(
+          (a, b) =>
+            new Date(
+              a.appointment_at
+            ) -
+            new Date(
+              b.appointment_at
+            )
+        );
+
+    const totalSlots =
+      (
+        (WORK_END_HOUR -
+          WORK_START_HOUR) *
+        60
+      ) /
+      SERVICE_SLOT_MINUTES;
+
+    const freeCount =
+      Math.max(
+        0,
+        totalSlots -
+          appointments.length
+      );
+
+    html += `
+      <button
+        type="button"
+        class="
+          calendar-day
+          ${
+            key === todayKey
+              ? "today"
+              : ""
+          }
+          ${
+            key === calendarSelectedDate
+              ? "selected"
+              : ""
+          }
+        "
+        data-calendar-date="${key}">
+
+        <div
+          class="calendar-day-number">
+          ${day}
+        </div>
+
+        <div
+          class="calendar-count">
+
+          ${
+            appointments.length
+              ? `
+                📌 ${appointments.length}
+                servis${
+                  appointments.length === 1
+                    ? ""
+                    : "y"
+                }
+              `
+              : "—"
+          }
+
+        </div>
+
+        <div
+          class="calendar-free">
+          volno: ${freeCount} h
+        </div>
+
+      </button>
+    `;
+  }
+
+  html +=
+    `</div>`;
+
+  gridEl.innerHTML =
+    html;
+
+  document
+    .querySelectorAll(
+      "[data-calendar-date]"
+    )
+    .forEach(btn => {
+      btn.addEventListener(
+        "click",
+        () => {
+          calendarSelectedDate =
+            btn.dataset.calendarDate;
+
+          renderCalendar();
+
+          renderCalendarDay(
+            calendarSelectedDate
+          );
+        }
+      );
+    });
+
+  if (calendarSelectedDate) {
+    const selectedMonth =
+      calendarSelectedDate.slice(
+        0,
+        7
+      );
+
+    const currentMonth =
+      `${y}-${String(
+        m + 1
+      ).padStart(2, "0")}`;
+
+    if (
+      selectedMonth ===
+      currentMonth
+    ) {
+      renderCalendarDay(
+        calendarSelectedDate
+      );
+    }
+  }
+}
+function renderCalendarDay(key) {
+  const el =
+    $("calendarDayDetail");
+
+  if (!el) return;
+
+  const appointments =
+    customers
+      .filter(
+        c =>
+          c.status !== "Dokončeno" &&
+          c.appointment_at &&
+          dateKeyLocal(
+            new Date(
+              c.appointment_at
+            )
+          ) === key
+      )
+      .sort(
+        (a, b) =>
+          new Date(
+            a.appointment_at
+          ) -
+          new Date(
+            b.appointment_at
+          )
+      );
+
+  const occupiedHours =
+    new Set(
+      appointments.map(c => {
+        const d =
+          new Date(
+            c.appointment_at
+          );
+
+        return `${String(
+          d.getHours()
+        ).padStart(2, "0")}:${String(
+          d.getMinutes()
+        ).padStart(2, "0")}`;
+      })
+    );
+
+  const free = [];
+
+  for (
+    let hour =
+      WORK_START_HOUR;
+    hour < WORK_END_HOUR;
+    hour++
+  ) {
+    const time =
+      `${String(hour).padStart(
+        2,
+        "0"
+      )}:00`;
+
+    if (
+      !occupiedHours.has(
+        time
+      )
+    ) {
+      free.push(time);
+    }
+  }
+
+  el.innerHTML = `
+    <div>
+      <h3>
+        📅 ${esc(
+          formatDayLong(key)
+        )}
+      </h3>
+
+      <p class="muted">
+        Naplánováno:
+        <b>${appointments.length}</b>
+
+        ·
+
+        Volné hodinové sloty:
+        <b>${free.length}</b>
+      </p>
+    </div>
+
+    <div>
+      <h4>
+        Naplánované servisy
+      </h4>
+
+      ${
+        appointments.length
+          ? appointments
+              .map(
+                c => `
+                  <div
+                    class="appointment-row">
+
+                    <div
+                      class="appointment-time">
+                      ${esc(
+                        formatTime(
+                          c.appointment_at
+                        )
+                      )}
+                    </div>
+
+                    <div
+                      style="flex:1">
+
+                      <strong>
+                        ${esc(
+                          c.full_name
+                        )}
+                      </strong>
+
+                      <div
+                        class="muted">
+                        ${esc(
+                          c.address ||
+                            ""
+                        )}
+                      </div>
+
+                    </div>
+
+                    <button
+                      type="button"
+                      class="primary"
+                      data-open-customer="${c.id}">
+                      Otevřít
+                    </button>
+
+                  </div>
+                `
+              )
+              .join("")
+          : `
+              <p class="muted">
+                Na tento den není nic naplánováno.
+              </p>
+            `
+      }
+    </div>
+
+    <div
+      style="margin-top:14px">
+
+      <h4>
+        Volné kapacity
+      </h4>
+
+      ${
+        free.length
+          ? free
+              .map(
+                t => `
+                  <button
+                    type="button"
+                    class="free-slot"
+                    data-free-time="${key}T${t}">
+                    ${t}
+                  </button>
+                `
+              )
+              .join("")
+          : `
+              <p class="muted">
+                Tento den je plně obsazený.
+              </p>
+            `
+      }
+
+      <p
+        class="muted"
+        style="margin-top:8px">
+
+        Kapacita je zatím počítána jako
+        1 servis = 1 hodina,
+        pracovní doba
+        ${WORK_START_HOUR}:00–${WORK_END_HOUR}:00.
+
+      </p>
+    </div>
+  `;
+
+  el
+    .querySelectorAll(
+      "[data-free-time]"
+    )
+    .forEach(btn => {
+      btn.addEventListener(
+        "click",
+        () => {
+          openNewCustomerAt(
+            btn.dataset.freeTime
+          );
+        }
+      );
+    });
+}
+
+function openCalendar() {
+  ensureServiceViews();
+
+  renderCalendar();
+
+  showView(
+    "calendarView"
+  );
+}
+
+function openNewCustomerAt(
+  value
+) {
+  showView(
+    "customerFormView"
+  );
+
+  const input =
+    $("appointmentAt");
+
+  if (!input) return;
+
+  const d =
+    new Date(value);
+
+  const pad =
+    n =>
+      String(n).padStart(
+        2,
+        "0"
+      );
+
+  input.value =
+    `${d.getFullYear()}-${pad(
+      d.getMonth() + 1
+    )}-${pad(
+      d.getDate()
+    )}T${pad(
+      d.getHours()
+    )}:${pad(
+      d.getMinutes()
+    )}`;
+
+  input.focus();
+}
+
+/* =========================================================
+   DOMOV
+   ========================================================= */
+
+function renderHome() {
+  /*
+    Roční servis se počítá podle annual_service_due,
+    nikoliv podle statusu.
+    
+    Díky tomu může být zákazník současně:
+    - v Hotové
+    - a v Ročních servisech
+  */
+
+  const due =
+    customers
+      .filter(
+        c =>
+          c.annual_service_due
+      )
+      .filter(
+        c =>
+          daysUntil(
+            c.annual_service_due
+          ) <= 14
+      );
+
   if ($("reminderCount")) {
     $("reminderCount").textContent =
-      reminders.length;
+      due.length;
   }
 
   if ($("reminders")) {
     $("reminders").innerHTML =
-      reminders.length
-        ? reminders
+      due.length
+        ? due
+            .sort(
+              (a, b) =>
+                a.annual_service_due.localeCompare(
+                  b.annual_service_due
+                )
+            )
             .map(c => {
               const days =
                 daysUntil(
                   c.annual_service_due
                 );
 
-              const when =
+              const text =
                 days < 0
                   ? `po termínu o ${Math.abs(days)} dní`
                   : days === 0
@@ -362,37 +1502,50 @@ function renderHome() {
                   : `za ${days} dní`;
 
               return `
-                <div class="reminder ${
-                  days < 0
-                    ? "overdue"
-                    : ""
-                }">
+                <div
+                  class="
+                    reminder
+                    ${
+                      days < 0
+                        ? "overdue"
+                        : ""
+                    }
+                  ">
 
                   <div>
-
                     <strong>
-                      ${esc(c.full_name)}
+                      ${esc(
+                        c.full_name
+                      )}
                     </strong>
 
                     <span>
-                      ${esc(c.phone || "")}
+                      ${esc(
+                        c.phone || ""
+                      )}
+                      ·
+                      ${esc(
+                        c.address || ""
+                      )}
                     </span>
 
+                    <br>
+
                     <small>
-                      Roční servis
+                      Roční servis:
                       ${fmtDate(
                         c.annual_service_due
                       )}
                       —
-                      <b>${when}</b>
+                      <b>
+                        ${text}
+                      </b>
                     </small>
-
                   </div>
 
                   <button
                     class="primary"
-                    data-open-customer="${c.id}"
-                  >
+                    data-open-customer="${c.id}">
                     Otevřít
                   </button>
 
@@ -400,132 +1553,196 @@ function renderHome() {
               `;
             })
             .join("")
-        : "<p class='muted'>Žádný servis není do 14 dní.</p>";
+        : `
+            <p class="muted">
+              Žádný roční servis není do 14 dní.
+            </p>
+          `;
   }
 
-  if ($("stats")) {
-    $("stats").innerHTML = `
-      <div class="stat">
-        <span>Zákazníků</span>
-        <b>${customers.length}</b>
-      </div>
+  const planned =
+    customers.filter(
+      c =>
+        c.status !== "Dokončeno"
+    ).length;
 
-      <div class="stat">
-        <span>Naplánováno</span>
-        <b>
-          ${
-            customers.filter(
-              c =>
-                c.status ===
-                "Naplánováno"
-            ).length
-          }
-        </b>
-      </div>
+  const done =
+    customers.filter(
+      c =>
+        c.status === "Dokončeno"
+    ).length;
 
-      <div class="stat">
-        <span>Roční servis</span>
-        <b>
-          ${
-            customers.filter(
-              c =>
-                c.annual_service_due
-            ).length
-          }
-        </b>
-      </div>
-    `;
+  if ($("totalCustomers")) {
+    $("totalCustomers").textContent =
+      customers.length;
+  }
+
+  if ($("activeCustomers")) {
+    $("activeCustomers").textContent =
+      planned;
+  }
+
+  if ($("doneCustomers")) {
+    $("doneCustomers").textContent =
+      done;
   }
 }
 
+/* =========================================================
+   SEZNAM ZÁKAZNÍKŮ
+   ========================================================= */
+
 function renderCustomers() {
-  const search =
-    $("customerSearch")
-      ?.value
-      .toLowerCase()
-      .trim() || "";
-
   const list =
-    customers.filter(c =>
-      [
-        c.full_name,
-        c.phone,
-        c.email,
-        c.address,
-        c.problem
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(search)
-    );
+    $("customersList");
 
-  if (!$("customerList")) {
-    return;
-  }
+  if (!list) return;
 
-  $("customerList").innerHTML =
-    list.length
-      ? list
+  const search =
+    (
+      $("customerSearch")?.value ||
+      ""
+    )
+      .trim()
+      .toLowerCase();
+
+  const filtered =
+    activeCustomers()
+      .filter(c => {
+        if (!search) {
+          return true;
+        }
+
+        return [
+          c.full_name,
+          c.phone,
+          c.email,
+          c.address,
+          c.problem
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(search);
+      });
+
+  list.innerHTML =
+    filtered.length
+      ? filtered
           .map(
             c => `
-              <div class="customer-card">
+              <div
+                class="customer-card">
 
                 <div>
-
                   <h3>
-                    ${esc(c.full_name)}
+                    ${esc(
+                      c.full_name
+                    )}
                   </h3>
 
                   <p>
-                    ${esc(c.phone || "")}
-                    ${esc(c.address || "")}
+                    ${esc(
+                      c.phone || ""
+                    )}
                   </p>
 
                   <small>
-
-                    ${esc(
-                      c.status || ""
-                    )}
-
                     ${
                       c.appointment_at
-                        ? ` · servis ${fmtDate(
-                            c.appointment_at,
-                            true
-                          )}`
-                        : ""
+                        ? `Servis:
+                            ${fmtDate(
+                              c.appointment_at,
+                              true
+                            )}`
+                        : "Termín není nastaven"
                     }
-
-                    ${
-                      c.annual_service_due
-                        ? ` · roční servis ${fmtDate(
-                            c.annual_service_due
-                          )}`
-                        : ""
-                    }
-
                   </small>
-
                 </div>
 
                 <button
+                  type="button"
                   class="primary"
-                  data-open-customer="${c.id}"
-                >
-                  Detail
+                  data-open-customer="${c.id}">
+                  Otevřít
                 </button>
 
               </div>
             `
           )
           .join("")
-      : "<p class='muted'>Žádný zákazník.</p>";
+      : `
+          <p class="muted">
+            Žádní aktivní zákazníci.
+          </p>
+        `;
 }
-
 
 /* =========================================================
    DETAIL ZÁKAZNÍKA
    ========================================================= */
+
+function ensureAnnualTransferButton() {
+  let button =
+    $("transferAnnualBtn");
+
+  if (button) {
+    return button;
+  }
+
+  const completeButton =
+    $("completeBtn");
+
+  const parent =
+    completeButton?.parentElement ||
+    $("detailView");
+
+  if (!parent) {
+    return null;
+  }
+
+  button =
+    document.createElement(
+      "button"
+    );
+
+  button.type =
+    "button";
+
+  button.id =
+    "transferAnnualBtn";
+
+  button.className =
+    "primary hidden";
+
+  button.textContent =
+    "🔧 Převést na roční servis";
+
+  button.style.marginTop =
+    "10px";
+
+  button.addEventListener(
+    "click",
+    transferToAnnualService
+  );
+
+  if (
+    completeButton &&
+    completeButton.parentElement ===
+      parent
+  ) {
+    completeButton.insertAdjacentElement(
+      "afterend",
+      button
+    );
+  } else {
+    parent.appendChild(
+      button
+    );
+  }
+
+  return button;
+}
 
 function renderDetail() {
   const c =
@@ -540,15 +1757,17 @@ function renderDetail() {
 
   if ($("detailStatus")) {
     $("detailStatus").innerHTML = `
-      <span class="status ${
-        c.status === "Dokončeno"
-          ? "done"
-          : "planned"
-      }">
+      <span
+        class="status ${
+          c.status === "Dokončeno"
+            ? "done"
+            : "planned"
+        }">
+
         ${esc(
-          c.status ||
-          "Naplánováno"
+          c.status || ""
         )}
+
       </span>
     `;
   }
@@ -599,21 +1818,50 @@ function renderDetail() {
   }
 
   if ($("completeBtn")) {
-    $("completeBtn").classList.toggle(
+    $("completeBtn")
+      .classList.toggle(
+        "hidden",
+        c.status ===
+          "Dokončeno"
+      );
+  }
+
+  const annualButton =
+    ensureAnnualTransferButton();
+
+  if (annualButton) {
+    const canTransfer =
+      c.status ===
+        "Dokončeno" &&
+      !c.annual_service_due;
+
+    annualButton.classList.toggle(
       "hidden",
-      ![
-        "Naplánováno",
-        "V řešení"
-      ].includes(c.status)
+      !canTransfer
     );
-  }
 
-  if ($("saveDetailBtn")) {
-    $("saveDetailBtn").textContent =
-      "Upravit zákazníka";
-  }
+    if (
+      c.annual_service_due
+    ) {
+      annualButton.textContent =
+        `✓ Roční servis aktivní — ${fmtDate(
+          c.annual_service_due
+        )}`;
 
-  renderNotes();
+      annualButton.classList.remove(
+        "hidden"
+      );
+
+      annualButton.disabled =
+        true;
+    } else {
+      annualButton.textContent =
+        "🔧 Převést na roční servis";
+
+      annualButton.disabled =
+        false;
+    }
+  }
 }
 
 async function openCustomer(id) {
@@ -626,7 +1874,6 @@ async function openCustomer(id) {
     toast(
       "Zákazník nebyl nalezen."
     );
-
     return;
   }
 
@@ -635,330 +1882,138 @@ async function openCustomer(id) {
 
   renderDetail();
 
-  showView("detailView");
+  showView(
+    "detailView"
+  );
 
   await renderGallery();
 }
+
+/* =========================================================
+   ÚPRAVA ZÁKAZNÍKA
+   ========================================================= */
 
 async function editCustomer() {
   if (!currentCustomer) {
     return;
   }
 
-  const fullName =
-    prompt(
-      "Jméno a příjmení:",
-      currentCustomer.full_name || ""
-    );
-
-  if (fullName === null) return;
-
-  const phone =
-    prompt(
-      "Telefon:",
+  const fields = [
+    [
+      "Jméno a příjmení",
+      currentCustomer.full_name
+    ],
+    [
+      "Telefon",
       currentCustomer.phone || ""
-    );
-
-  if (phone === null) return;
-
-  const email =
-    prompt(
-      "E-mail:",
+    ],
+    [
+      "E-mail",
       currentCustomer.email || ""
-    );
-
-  if (email === null) return;
-
-  const address =
-    prompt(
-      "Adresa:",
+    ],
+    [
+      "Adresa",
       currentCustomer.address || ""
-    );
-
-  if (address === null) return;
-
-  const problem =
-    prompt(
-      "Popis problému:",
+    ],
+    [
+      "Popis problému",
       currentCustomer.problem || ""
+    ]
+  ];
+
+  const values = [];
+
+  for (
+    const [label, value]
+    of fields
+  ) {
+    const result =
+      prompt(
+        label,
+        value
+      );
+
+    if (
+      result === null
+    ) {
+      return;
+    }
+
+    values.push(
+      result
     );
-
-  if (problem === null) return;
-
-  const {
-    data,
-    error
-  } = await sb
-    .from("customers")
-    .update({
-      full_name:
-        fullName.trim(),
-
-      phone:
-        phone.trim(),
-
-      email:
-        email.trim(),
-
-      address:
-        address.trim(),
-
-      problem:
-        problem.trim()
-    })
-    .eq(
-      "id",
-      currentCustomer.id
-    )
-    .eq(
-      "user_id",
-      currentUser.id
-    )
-    .select()
-    .single();
-
-  if (error) {
-    toast(error.message);
-    return;
   }
 
-  currentCustomer =
-    data;
-
-  customers =
-    customers.map(c =>
-      c.id === data.id
-        ? data
-        : c
-    );
-
-  renderHome();
-  renderCustomers();
-  renderDetail();
-
-  toast(
-    "Zákazník uložen."
-  );
-}
-
-
-/* =========================================================
-   NOVÝ ZÁKAZNÍK
-   ========================================================= */
-
-async function createCustomer(e) {
-  e.preventDefault();
-
-  if (!currentUser) {
-    toast(
-      "Nejste přihlášen."
-    );
-
-    return;
-  }
-
-  const fullName =
-    $("fullName")
-      ?.value
-      .trim();
-
-  if (!fullName) {
-    toast(
-      "Vyplňte jméno zákazníka."
-    );
-
-    return;
-  }
-
-  const appointmentValue =
-    $("appointmentAt")
-      ?.value || "";
-
-  const payload = {
-    user_id:
-      currentUser.id,
-
+  const patch = {
     full_name:
-      fullName,
+      values[0],
 
     phone:
-      $("phone")
-        ?.value
-        .trim() || "",
+      values[1],
 
     email:
-      $("email")
-        ?.value
-        .trim() || "",
+      values[2],
 
     address:
-      $("address")
-        ?.value
-        .trim() || "",
+      values[3],
 
     problem:
-      $("problem")
-        ?.value
-        .trim() || "",
-
-    appointment_at:
-      appointmentValue
-        ? new Date(
-            appointmentValue
-          ).toISOString()
-        : null,
-
-    status:
-      "Naplánováno",
-
-    completed_at:
-      null,
-
-    annual_service_due:
-      null
+      values[4]
   };
 
   const {
     data,
     error
-  } = await sb
-    .from("customers")
-    .insert(payload)
-    .select()
-    .single();
+  } =
+    await sb
+      .from("customers")
+      .update(patch)
+      .eq(
+        "id",
+        currentCustomer.id
+      )
+      .eq(
+        "user_id",
+        currentUser.id
+      )
+      .select()
+      .single();
 
   if (error) {
-    console.error(error);
-
     toast(
-      `Zákazník se nepodařil uložit: ${error.message}`
+      error.message
     );
-
     return;
   }
 
-  customers = [
-    data,
-    ...customers.filter(
+  currentCustomer =
+    data;
+
+  const index =
+    customers.findIndex(
       c =>
-        c.id !== data.id
-    )
-  ];
+        c.id ===
+        data.id
+    );
 
-  if ($("customerForm")) {
-    $("customerForm").reset();
-  }
-
-  currentCustomer =
-    data;
-
-  renderHome();
-  renderCustomers();
-  renderDetail();
-
-  showView(
-    "detailView"
-  );
-
-  await renderGallery();
-
-  toast(
-    "Zákazník uložen."
-  );
-}
-
-
-/* =========================================================
-   DOKONČENÍ OPRAVY
-   → DALŠÍ ROČNÍ SERVIS
-   ========================================================= */
-
-async function completeRepair() {
   if (
-    !currentCustomer ||
-    !currentUser
+    index !== -1
   ) {
-    return;
+    customers[index] =
+      data;
   }
-
-  const base =
-    currentCustomer
-      .appointment_at
-      ? new Date(
-          currentCustomer
-            .appointment_at
-        )
-      : new Date();
-
-  const annualDate =
-    nextAnnualDate(base);
-
-  const confirmed =
-    confirm(
-      `Oprava zákazníka ${currentCustomer.full_name} bude dokončena.\n\n`
-      +
-      `Další roční servis bude naplánován na ${fmtDate(annualDate)}.\n\n`
-      +
-      `14 dní před termínem se zobrazí upozornění.`
-    );
-
-  if (!confirmed) {
-    return;
-  }
-
-  const {
-    data,
-    error
-  } = await sb
-    .from("customers")
-    .update({
-      status:
-        "Dokončeno",
-
-      completed_at:
-        new Date().toISOString(),
-
-      annual_service_due:
-        annualDate
-    })
-    .eq(
-      "id",
-      currentCustomer.id
-    )
-    .eq(
-      "user_id",
-      currentUser.id
-    )
-    .select()
-    .single();
-
-  if (error) {
-    toast(error.message);
-    return;
-  }
-
-  currentCustomer =
-    data;
-
-  customers =
-    customers.map(c =>
-      c.id === data.id
-        ? data
-        : c
-    );
 
   renderHome();
   renderCustomers();
+  renderDone();
+  renderAnnualServices();
+  renderCalendar();
   renderDetail();
 
   toast(
-    `Hotovo. Další servis: ${fmtDate(
-      annualDate
-    )}.`
+    "Změny uloženy."
   );
 }
-
-
 /* =========================================================
    SMAZÁNÍ ZÁKAZNÍKA
    ========================================================= */
@@ -971,16 +2026,12 @@ async function deleteCustomer() {
     return;
   }
 
-  const name =
-    currentCustomer.full_name;
+  const confirmed =
+    confirm(
+      `Opravdu chcete smazat zákazníka ${currentCustomer.full_name}?\n\nSmaže se zákazník i všechny jeho fotografie. Tuto akci nelze vrátit.`
+    );
 
-  if (
-    !confirm(
-      `Opravdu smazat zákazníka ${name}?\n\n`
-      +
-      `Smažou se také jeho fotky a poznámky.`
-    )
-  ) {
+  if (!confirmed) {
     return;
   }
 
@@ -989,87 +2040,93 @@ async function deleteCustomer() {
 
   const {
     data: photos,
-    error: photoListError
-  } = await sb
-    .from("photos")
-    .select("path")
-    .eq(
-      "customer_id",
-      customerId
-    )
-    .eq(
-      "user_id",
-      currentUser.id
-    );
+    error: photosError
+  } =
+    await sb
+      .from("photos")
+      .select("path")
+      .eq(
+        "customer_id",
+        customerId
+      )
+      .eq(
+        "user_id",
+        currentUser.id
+      );
 
-  if (photoListError) {
+  if (photosError) {
     toast(
-      photoListError.message
+      photosError.message
     );
-
     return;
   }
 
-  if (photos?.length) {
+  if (
+    photos &&
+    photos.length
+  ) {
+    const paths =
+      photos.map(
+        photo =>
+          photo.path
+      );
+
     const {
-      error
+      error: storageError
     } =
       await sb.storage
         .from(
           PHOTO_BUCKET
         )
-        .remove(
-          photos.map(
-            p => p.path
-          )
-        );
+        .remove(paths);
 
-    if (error) {
-      console.warn(
-        "Storage delete:",
-        error
+    if (storageError) {
+      toast(
+        storageError.message
       );
+      return;
     }
   }
 
   const {
-    error: photosDeleteError
-  } = await sb
-    .from("photos")
-    .delete()
-    .eq(
-      "customer_id",
-      customerId
-    )
-    .eq(
-      "user_id",
-      currentUser.id
-    );
+    error: dbPhotosError
+  } =
+    await sb
+      .from("photos")
+      .delete()
+      .eq(
+        "customer_id",
+        customerId
+      )
+      .eq(
+        "user_id",
+        currentUser.id
+      );
 
-  if (photosDeleteError) {
+  if (dbPhotosError) {
     toast(
-      photosDeleteError.message
+      dbPhotosError.message
     );
-
     return;
   }
 
-  const {
-    error
-  } = await sb
-    .from("customers")
-    .delete()
-    .eq(
-      "id",
-      customerId
-    )
-    .eq(
-      "user_id",
-      currentUser.id
-    );
+  const { error } =
+    await sb
+      .from("customers")
+      .delete()
+      .eq(
+        "id",
+        customerId
+      )
+      .eq(
+        "user_id",
+        currentUser.id
+      );
 
   if (error) {
-    toast(error.message);
+    toast(
+      error.message
+    );
     return;
   }
 
@@ -1085,6 +2142,9 @@ async function deleteCustomer() {
 
   renderHome();
   renderCustomers();
+  renderDone();
+  renderAnnualServices();
+  renderCalendar();
 
   showView(
     "customersView"
@@ -1095,86 +2155,383 @@ async function deleteCustomer() {
   );
 }
 
-
 /* =========================================================
-   POZNÁMKY
+   DOKONČENÍ OPRAVY
    ========================================================= */
 
-async function renderNotes() {
-  if (
-    !currentCustomer ||
-    !$("notesBox")
-  ) {
+async function completeRepair() {
+  if (!currentCustomer) {
     return;
   }
 
-  $("notesBox").value =
-    currentCustomer.notes ||
-    "";
-}
+  const confirmed =
+    confirm(
+      `Označit opravu ${currentCustomer.full_name} jako dokončenou?\n\nRoční servis se nyní NEVYTVOŘÍ. Pokud ho budeš chtít, později použiješ tlačítko „Převést na roční servis“.`
+    );
 
-async function saveNotes() {
-  if (
-    !currentCustomer ||
-    !currentUser
-  ) {
+  if (!confirmed) {
     return;
   }
 
-  const notes =
-    $("notesBox")
-      ?.value || "";
+  /*
+    TADY JE DŮLEŽITÁ ZMĚNA:
+
+    Dokončení opravy pouze nastaví:
+    - Dokončeno
+    - datum dokončení
+
+    annual_service_due se zde vůbec nenastavuje.
+  */
 
   const {
     data,
     error
-  } = await sb
-    .from("customers")
-    .update({
-      notes
-    })
-    .eq(
-      "id",
-      currentCustomer.id
-    )
-    .eq(
-      "user_id",
-      currentUser.id
-    )
-    .select()
-    .single();
+  } =
+    await sb
+      .from("customers")
+      .update({
+        status:
+          "Dokončeno",
+
+        completed_at:
+          new Date()
+            .toISOString(),
+
+        updated_at:
+          new Date()
+            .toISOString()
+      })
+      .eq(
+        "id",
+        currentCustomer.id
+      )
+      .eq(
+        "user_id",
+        currentUser.id
+      )
+      .select()
+      .single();
 
   if (error) {
     toast(
-      "Poznámky nelze uložit. Spusť dodané SQL v Supabase."
+      error.message
     );
-
-    console.error(error);
-
     return;
   }
 
   currentCustomer =
     data;
 
-  customers =
-    customers.map(c =>
-      c.id === data.id
-        ? data
-        : c
+  const index =
+    customers.findIndex(
+      c =>
+        c.id ===
+        data.id
     );
 
+  if (
+    index !== -1
+  ) {
+    customers[index] =
+      data;
+  }
+
+  renderHome();
+  renderCustomers();
+  renderDone();
+  renderAnnualServices();
+  renderCalendar();
+  renderDetail();
+
   toast(
-    "Poznámky uloženy."
+    "Servis je hotový a přesunul se do záložky Hotové."
   );
 }
 
-
 /* =========================================================
-   FOTKY
+   RUČNÍ PŘEVOD DO ROČNÍHO SERVISU
    ========================================================= */
 
-function loadImage(file) {
+function annualDueDateForCustomer(
+  customer
+) {
+  /*
+    Datum dalšího ročního servisu
+    počítáme jeden rok od dokončení.
+
+    Pokud by completed_at chyběl,
+    použije se appointment_at.
+  */
+
+  const baseValue =
+    customer.completed_at ||
+    customer.appointment_at ||
+    new Date().toISOString();
+
+  const d =
+    new Date(
+      baseValue
+    );
+
+  if (
+    Number.isNaN(
+      d.getTime()
+    )
+  ) {
+    return nextYearDate();
+  }
+
+  d.setFullYear(
+    d.getFullYear() + 1
+  );
+
+  return d
+    .toISOString()
+    .slice(0, 10);
+}
+
+async function transferToAnnualService() {
+  if (!currentCustomer) {
+    return;
+  }
+
+  if (
+    currentCustomer.status !==
+    "Dokončeno"
+  ) {
+    toast(
+      "Nejdříve dokonči servis."
+    );
+    return;
+  }
+
+  if (
+    currentCustomer.annual_service_due
+  ) {
+    toast(
+      `Roční servis už je nastavený na ${fmtDate(
+        currentCustomer.annual_service_due
+      )}.`
+    );
+    return;
+  }
+
+  const due =
+    annualDueDateForCustomer(
+      currentCustomer
+    );
+
+  const confirmed =
+    confirm(
+      `Převést ${currentCustomer.full_name} do ročního servisu?\n\nDalší roční servis bude nastaven na ${fmtDate(due)}.\n\nZákazník zůstane zároveň v záložce Hotové.`
+    );
+
+  if (!confirmed) {
+    return;
+  }
+
+  const {
+    data,
+    error
+  } =
+    await sb
+      .from("customers")
+      .update({
+        annual_service_due:
+          due,
+
+        updated_at:
+          new Date()
+            .toISOString()
+      })
+      .eq(
+        "id",
+        currentCustomer.id
+      )
+      .eq(
+        "user_id",
+        currentUser.id
+      )
+      .select()
+      .single();
+
+  if (error) {
+    toast(
+      error.message
+    );
+    return;
+  }
+
+  currentCustomer =
+    data;
+
+  const index =
+    customers.findIndex(
+      c =>
+        c.id ===
+        data.id
+    );
+
+  if (
+    index !== -1
+  ) {
+    customers[index] =
+      data;
+  }
+
+  renderHome();
+  renderCustomers();
+  renderDone();
+  renderAnnualServices();
+  renderCalendar();
+  renderDetail();
+
+  toast(
+    `Převedeno do ročního servisu: ${fmtDate(
+      due
+    )}.`
+  );
+}
+
+/* =========================================================
+   NOVÝ ZÁKAZNÍK
+   ========================================================= */
+
+async function createCustomer(e) {
+  e.preventDefault();
+
+  if (!currentUser) {
+    toast(
+      "Nejste přihlášen."
+    );
+    return;
+  }
+
+  const fullName =
+    $("fullName")
+      .value
+      .trim();
+
+  if (!fullName) {
+    toast(
+      "Vyplňte jméno zákazníka."
+    );
+    return;
+  }
+
+  const payload = {
+    user_id:
+      currentUser.id,
+
+    full_name:
+      fullName,
+
+    phone:
+      $("phone")
+        .value
+        .trim(),
+
+    email:
+      $("email")
+        .value
+        .trim(),
+
+    address:
+      $("address")
+        .value
+        .trim(),
+
+    problem:
+      $("problem")
+        .value
+        .trim(),
+
+    appointment_at:
+      $("appointmentAt").value
+        ? new Date(
+            $("appointmentAt")
+              .value
+          ).toISOString()
+        : null,
+
+    status:
+      "Naplánováno"
+  };
+
+  console.log(
+    "UKLÁDÁM ZÁKAZNÍKA:",
+    payload
+  );
+
+  const {
+    data,
+    error
+  } =
+    await sb
+      .from("customers")
+      .insert(payload)
+      .select()
+      .single();
+
+  if (error) {
+    console.error(
+      "CHYBA PŘI UKLÁDÁNÍ:",
+      error
+    );
+
+    toast(
+      error.message
+    );
+
+    return;
+  }
+
+  console.log(
+    "NOVÝ ZÁKAZNÍK:",
+    data
+  );
+
+  customers = [
+    data,
+    ...customers.filter(
+      c =>
+        c.id !==
+        data.id
+    )
+  ];
+
+  $("customerForm")
+    .reset();
+
+  renderHome();
+  renderCustomers();
+  renderDone();
+  renderAnnualServices();
+  renderCalendar();
+
+  currentCustomer =
+    data;
+
+  renderDetail();
+
+  showView(
+    "detailView"
+  );
+
+  await renderGallery();
+
+  toast(
+    "Zákazník uložen."
+  );
+}
+
+/* =========================================================
+   FOTOGRAFIE
+   ========================================================= */
+
+function fileToImage(
+  file
+) {
   return new Promise(
     (resolve, reject) => {
       const url =
@@ -1193,34 +2550,27 @@ function loadImage(file) {
         resolve(img);
       };
 
-      img.onerror = () => {
-        URL.revokeObjectURL(
-          url
-        );
+      img.onerror =
+        reject;
 
-        reject(
-          new Error(
-            "Fotku nelze načíst."
-          )
-        );
-      };
-
-      img.src = url;
+      img.src =
+        url;
     }
   );
 }
 
-function blobFromCanvas(
+function canvasBlob(
   canvas,
   quality
 ) {
   return new Promise(
-    resolve =>
+    resolve => {
       canvas.toBlob(
         resolve,
         "image/jpeg",
         quality
-      )
+      );
+    }
   );
 }
 
@@ -1228,15 +2578,11 @@ async function compressImage(
   file
 ) {
   const img =
-    await loadImage(file);
+    await fileToImage(
+      file
+    );
 
-  let width =
-    img.naturalWidth;
-
-  let height =
-    img.naturalHeight;
-
-  const maxSide =
+  let maxSide =
     1600;
 
   const scale =
@@ -1244,24 +2590,26 @@ async function compressImage(
       1,
       maxSide /
         Math.max(
-          width,
-          height
+          img.naturalWidth,
+          img.naturalHeight
         )
     );
 
-  width =
+  let width =
     Math.max(
       1,
       Math.round(
-        width * scale
+        img.naturalWidth *
+          scale
       )
     );
 
-  height =
+  let height =
     Math.max(
       1,
       Math.round(
-        height * scale
+        img.naturalHeight *
+          scale
       )
     );
 
@@ -1272,7 +2620,10 @@ async function compressImage(
 
   const ctx =
     canvas.getContext(
-      "2d"
+      "2d",
+      {
+        alpha: false
+      }
     );
 
   canvas.width =
@@ -1293,7 +2644,7 @@ async function compressImage(
     0.82;
 
   let blob =
-    await blobFromCanvas(
+    await canvasBlob(
       canvas,
       quality
     );
@@ -1302,45 +2653,45 @@ async function compressImage(
     let i = 0;
     i < 8 &&
     blob &&
-    blob.size > TARGET_BYTES;
+    blob.size >
+      TARGET_BYTES;
     i++
   ) {
-    quality -= 0.07;
+    quality -=
+      0.08;
 
     if (
-      quality < 0.25
+      quality <
+      0.25
     ) {
       break;
     }
 
     blob =
-      await blobFromCanvas(
+      await canvasBlob(
         canvas,
         quality
       );
   }
 
-  if (!blob) {
-    throw new Error(
-      "Fotku se nepodařilo zpracovat."
-    );
-  }
-
   if (
+    blob &&
     blob.size >
-    TARGET_BYTES
+      TARGET_BYTES
   ) {
     const ratio =
       Math.sqrt(
         TARGET_BYTES /
           blob.size
-      ) * 0.92;
+      ) *
+      0.92;
 
     width =
       Math.max(
         640,
         Math.round(
-          width * ratio
+          width *
+            ratio
         )
       );
 
@@ -1348,7 +2699,8 @@ async function compressImage(
       Math.max(
         480,
         Math.round(
-          height * ratio
+          height *
+            ratio
         )
       );
 
@@ -1367,10 +2719,16 @@ async function compressImage(
     );
 
     blob =
-      await blobFromCanvas(
+      await canvasBlob(
         canvas,
         0.72
       );
+  }
+
+  if (!blob) {
+    throw new Error(
+      "Prohlížeč neumí převést fotografii."
+    );
   }
 
   return new File(
@@ -1388,28 +2746,28 @@ async function uploadPhotos(
 ) {
   if (
     !currentCustomer ||
-    !currentUser ||
     !files.length
   ) {
     return;
   }
 
-  let uploaded = 0;
+  let ok = 0;
 
   for (
-    const file of files
+    const original
+    of files
   ) {
     try {
       const compressed =
         await compressImage(
-          file
+          original
         );
 
       const path =
         `${currentUser.id}/${currentCustomer.id}/${compressed.name}`;
 
       const {
-        error: uploadError
+        error
       } =
         await sb.storage
           .from(
@@ -1430,8 +2788,8 @@ async function uploadPhotos(
             }
           );
 
-      if (uploadError) {
-        throw uploadError;
+      if (error) {
+        throw error;
       }
 
       const {
@@ -1450,21 +2808,15 @@ async function uploadPhotos(
           });
 
       if (dbError) {
-        await sb.storage
-          .from(
-            PHOTO_BUCKET
-          )
-          .remove([
-            path
-          ]);
-
         throw dbError;
       }
 
-      uploaded++;
+      ok++;
 
     } catch (error) {
-      console.error(error);
+      console.error(
+        error
+      );
 
       toast(
         `Fotku se nepodařilo nahrát: ${error.message}`
@@ -1472,9 +2824,9 @@ async function uploadPhotos(
     }
   }
 
-  if (uploaded) {
+  if (ok) {
     toast(
-      `${uploaded} fotka/fotek nahráno.`
+      `${ok} fotka/fotek nahráno.`
     );
   }
 
@@ -1482,10 +2834,7 @@ async function uploadPhotos(
 }
 
 async function renderGallery() {
-  if (
-    !currentCustomer ||
-    !$("gallery")
-  ) {
+  if (!currentCustomer) {
     return;
   }
 
@@ -1500,10 +2849,6 @@ async function renderGallery() {
         "customer_id",
         currentCustomer.id
       )
-      .eq(
-        "user_id",
-        currentUser.id
-      )
       .order(
         "created_at",
         {
@@ -1514,9 +2859,8 @@ async function renderGallery() {
 
   if (error) {
     toast(
-      `Fotky: ${error.message}`
+      error.message
     );
-
     return;
   }
 
@@ -1524,92 +2868,71 @@ async function renderGallery() {
     data || [];
 
   if ($("photoCount")) {
-    $("photoCount")
-      .textContent =
+    $("photoCount").textContent =
       photos.length;
   }
 
-  if (!photos.length) {
-    $("gallery").innerHTML =
-      "<p class='muted'>Zatím zde nejsou žádné fotky.</p>";
+  if (
+    !photos.length
+  ) {
+    if ($("gallery")) {
+      $("gallery").innerHTML =
+        "<p class='muted'>Zatím zde nejsou žádné fotky.</p>";
+    }
 
     return;
   }
 
-  $("gallery").innerHTML =
-    "";
+  const paths =
+    photos.map(
+      photo =>
+        photo.path
+    );
 
-  for (
-    let i = 0;
-    i < photos.length;
-    i++
-  ) {
-    const photo =
-      photos[i];
+  const {
+    data: urls,
+    error: urlError
+  } =
+    await sb.storage
+      .from(
+        PHOTO_BUCKET
+      )
+      .createSignedUrls(
+        paths,
+        3600
+      );
 
-    const {
-      data: signed,
-      error: signedError
-    } =
-      await sb.storage
-        .from(
-          PHOTO_BUCKET
+  if (urlError) {
+    toast(
+      urlError.message
+    );
+    return;
+  }
+
+  if ($("gallery")) {
+    $("gallery").innerHTML =
+      (urls || [])
+        .map(
+          (
+            item,
+            index
+          ) => `
+            <figure>
+              <img
+                loading="lazy"
+                src="${item.signedUrl}"
+                alt="Fotka okna ${
+                  index + 1
+                }">
+            </figure>
+          `
         )
-        .createSignedUrl(
-          photo.path,
-          3600
-        );
-
-    const figure =
-      document.createElement(
-        "figure"
-      );
-
-    if (
-      signedError ||
-      !signed?.signedUrl
-    ) {
-      figure.innerHTML =
-        "<p style='color:#b00020'>Fotku nelze zobrazit.</p>";
-    } else {
-      const img =
-        document.createElement(
-          "img"
-        );
-
-      img.src =
-        signed.signedUrl;
-
-      img.alt =
-        `Fotka ${i + 1}`;
-
-      img.loading =
-        "lazy";
-
-      img.style.cursor =
-        "pointer";
-
-      img.onclick = () =>
-        window.open(
-          signed.signedUrl,
-          "_blank"
-        );
-
-      figure.appendChild(
-        img
-      );
-    }
-
-    $("gallery")
-      .appendChild(
-        figure
-      );
+        .join("");
   }
 }
 
-
 /* =========================================================
-   START APLIKACE
+   SPUŠTĚNÍ APLIKACE
    ========================================================= */
 
 async function startApp(
@@ -1619,21 +2942,29 @@ async function startApp(
     currentUser =
       null;
 
-    customers = [];
+    customers =
+      [];
 
     currentCustomer =
       null;
 
+    appStarted =
+      false;
+
     if ($("appView")) {
       $("appView")
         .classList
-        .add("hidden");
+        .add(
+          "hidden"
+        );
     }
 
     if ($("authView")) {
       $("authView")
         .classList
-        .remove("hidden");
+        .remove(
+          "hidden"
+        );
     }
 
     return;
@@ -1643,8 +2974,7 @@ async function startApp(
     session.user;
 
   if ($("userLabel")) {
-    $("userLabel")
-      .textContent =
+    $("userLabel").textContent =
       currentUser.email ||
       "";
   }
@@ -1652,25 +2982,37 @@ async function startApp(
   if ($("authView")) {
     $("authView")
       .classList
-      .add("hidden");
+      .add(
+        "hidden"
+      );
   }
 
   if ($("appView")) {
     $("appView")
       .classList
-      .remove("hidden");
+      .remove(
+        "hidden"
+      );
   }
 
+  ensureServiceViews();
+
   await loadCustomers();
+
+  if (!appStarted) {
+    subscribeRealtime();
+
+    appStarted =
+      true;
+  }
 
   showView(
     "homeView"
   );
 }
 
-
 /* =========================================================
-   EVENTY
+   KLIKNUTÍ V APLIKACI
    ========================================================= */
 
 document.addEventListener(
@@ -1702,6 +3044,42 @@ document.addEventListener(
           .openCustomer
       );
 
+      return;
+    }
+
+    if (
+      e.target.closest(
+        "#calendarBtn"
+      ) ||
+      e.target.closest(
+        '[data-nav="calendar"]'
+      )
+    ) {
+      openCalendar();
+      return;
+    }
+
+    if (
+      e.target.closest(
+        "#annualServicesBtn"
+      ) ||
+      e.target.closest(
+        '[data-nav="annual"]'
+      )
+    ) {
+      openAnnualServices();
+      return;
+    }
+
+    if (
+      e.target.closest(
+        "#doneBtn"
+      ) ||
+      e.target.closest(
+        '[data-nav="done"]'
+      )
+    ) {
+      openDone();
       return;
     }
 
@@ -1746,8 +3124,6 @@ document.addEventListener(
         "homeView"
       );
 
-      renderHome();
-
       return;
     }
 
@@ -1757,19 +3133,16 @@ document.addEventListener(
       )
     ) {
       showView(
-        "customersView"
+        "homeView"
       );
-
-      renderCustomers();
 
       return;
     }
   }
 );
 
-
 /* =========================================================
-   FORMULÁŘE A TLAČÍTKA
+   FORMULÁŘE A OVLÁDÁNÍ
    ========================================================= */
 
 if ($("authForm")) {
@@ -1819,18 +3192,12 @@ if ($("photoInput")) {
   $("photoInput")
     .addEventListener(
       "change",
-      async e => {
-
-        const files =
+      e => {
+        uploadPhotos(
           [
-            ...e.target.files
-          ];
-
-        e.target.value =
-          "";
-
-        await uploadPhotos(
-          files
+            ...e.target
+              .files
+          ]
         );
       }
     );
@@ -1860,60 +3227,39 @@ if ($("deleteCustomerBtn")) {
     );
 }
 
-if ($("saveNotesBtn")) {
-  $("saveNotesBtn")
-    .addEventListener(
-      "click",
-      saveNotes
-    );
-}
-
-
 /* =========================================================
-   SPUŠTĚNÍ APLIKACE
+   SUPABASE AUTH
    ========================================================= */
+
+ensureServiceViews();
 
 setAuthMode(
   "login"
 );
 
-sb.auth.onAuthStateChange(
-  (event, session) => {
-
-    if (
-      event ===
-      "SIGNED_OUT"
-    ) {
-      startApp(
-        null
-      );
-    }
-  }
-);
-
-(async function boot() {
-
+async function initApp() {
   const {
-    data,
-    error
+    data: {
+      session
+    }
   } =
     await sb.auth
       .getSession();
 
-  if (error) {
-    console.error(
-      error
-    );
-
-    toast(
-      `Chyba přihlášení: ${error.message}`
-    );
-
-    return;
-  }
-
   await startApp(
-    data.session
+    session
   );
 
-})();
+  sb.auth.onAuthStateChange(
+    async (
+      _event,
+      newSession
+    ) => {
+      await startApp(
+        newSession
+      );
+    }
+  );
+}
+
+initApp();
