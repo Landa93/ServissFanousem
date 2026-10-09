@@ -714,13 +714,17 @@ function renderDetail() {
       );
   }
 
-  if ($("completeBtn")) {
-    $("completeBtn").classList.toggle(
-      "hidden",
-      c.status ===
-        "Dokončeno"
-    );
-  }
+  
+if ($("completeBtn")) {
+  // Samostatné dokončení servisu
+  // bez automatického převodu na roční servis
+  $("completeBtn").textContent = "✓ Servis hotov";
+
+  $("completeBtn").classList.toggle(
+    "hidden",
+    c.status === "Dokončeno"
+  );
+}
 
   ensureAnnualButton();
 
