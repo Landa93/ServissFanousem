@@ -3124,27 +3124,34 @@ async function startApp(
 async function initApp() {
   ensurePlanningViews();
 
-  const {
-    data: {
-      session
-    }
-  } =
-    await sb.auth.getSession();
+  try {
+    const { data, error } = await sb.auth.getSession();
 
-  await startApp(
-    session
-  );
-
-  sb.auth.onAuthStateChange(
-    async (
-      _event,
-      newSession
-    ) => {
-      await startApp(
-        newSession
-      );
+    if (error) {
+      console.error("Chyba přihlášení:", error);
+      toast("Chyba přihlášení: " + error.message);
     }
-  );
+
+    await startApp(data?.session || null);
+
+  } catch (error) {
+    console.error("Chyba spuštění aplikace:", error);
+    toast("Aplikaci se nepodařilo spustit.");
+  }
+
+  sb.auth.onAuthStateChange((event, session) => {
+
+    // Zpracování přihlášení mimo callback Supabase
+    setTimeout(() => {
+
+      startApp(session).catch(error => {
+        console.error("Chyba načtení aplikace:", error);
+        toast("Chyba načtení: " + error.message);
+      });
+
+    }, 0);
+
+  });
 }
 
 initApp();
