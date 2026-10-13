@@ -41,6 +41,7 @@ let appStarted = false;
 
 let calendarDate = new Date();
 let selectedCalendarDay = null;
+let planningCustomerId = null;
 
 /* =========================================================
    POMOCNÉ FUNKCE
@@ -551,7 +552,6 @@ function renderHome() {
     `;
   }
 }
-
 /* =========================================================
    SEZNAM AKTIVNÍCH ZÁKAZNÍKŮ
    ========================================================= */
@@ -714,17 +714,15 @@ function renderDetail() {
       );
   }
 
-  
-if ($("completeBtn")) {
-  // Samostatné dokončení servisu
-  // bez automatického převodu na roční servis
-  $("completeBtn").textContent = "✓ Servis hotov";
+  if ($("completeBtn")) {
+    $("completeBtn").textContent =
+      "✓ Servis hotov";
 
-  $("completeBtn").classList.toggle(
-    "hidden",
-    c.status === "Dokončeno"
-  );
-}
+    $("completeBtn").classList.toggle(
+      "hidden",
+      c.status === "Dokončeno"
+    );
+  }
 
   ensureAnnualButton();
 
@@ -927,7 +925,6 @@ async function transferToAnnualService() {
     )}`
   );
 }
-
 /* =========================================================
    ÚPRAVA ZÁKAZNÍKA
    ========================================================= */
@@ -944,96 +941,64 @@ async function editCustomer() {
     ],
     [
       "Telefon",
-      currentCustomer.phone ||
-        ""
+      currentCustomer.phone || ""
     ],
     [
       "E-mail",
-      currentCustomer.email ||
-        ""
+      currentCustomer.email || ""
     ],
     [
       "Adresa",
-      currentCustomer.address ||
-        ""
+      currentCustomer.address || ""
     ],
     [
       "Popis problému",
-      currentCustomer.problem ||
-        ""
+      currentCustomer.problem || ""
     ]
   ];
 
   const values = [];
 
-  for (
-    const [label, value]
-    of fields
-  ) {
-    const result =
-      prompt(
-        label,
-        value
-      );
+  for (const [label, value] of fields) {
+    const result = prompt(label, value);
 
-    if (
-      result === null
-    ) {
+    if (result === null) {
       return;
     }
 
-    values.push(
-      result
-    );
+    values.push(result);
   }
 
   const patch = {
-    full_name:
-      values[0],
-    phone:
-      values[1],
-    email:
-      values[2],
-    address:
-      values[3],
-    problem:
-      values[4],
-    updated_at:
-      new Date().toISOString()
+    full_name: values[0],
+    phone: values[1],
+    email: values[2],
+    address: values[3],
+    problem: values[4],
+    updated_at: new Date().toISOString()
   };
 
-  const { data, error } =
-    await sb
-      .from("customers")
-      .update(patch)
-      .eq(
-        "id",
-        currentCustomer.id
-      )
-      .eq(
-        "user_id",
-        currentUser.id
-      )
-      .select()
-      .single();
+  const { data, error } = await sb
+    .from("customers")
+    .update(patch)
+    .eq("id", currentCustomer.id)
+    .eq("user_id", currentUser.id)
+    .select()
+    .single();
 
   if (error) {
     toast(error.message);
     return;
   }
 
-  currentCustomer =
-    data;
+  currentCustomer = data;
 
-  const index =
-    customers.findIndex(
-      c =>
-        c.id === data.id
-    );
+  const index = customers.findIndex(
+    c => c.id === data.id
+  );
 
   if (index !== -1) {
-    customers[index] =
-      data;
+    customers[index] = data;
   }
 
   renderHome();
@@ -1042,9 +1007,7 @@ async function editCustomer() {
   renderDone();
   renderDetail();
 
-  toast(
-    "Změny uloženy."
-  );
+  toast("Změny uloženy.");
 }
 
 /* =========================================================
@@ -1052,141 +1015,89 @@ async function editCustomer() {
    ========================================================= */
 
 async function deleteCustomer() {
-  if (
-    !currentCustomer ||
-    !currentUser
-  ) {
+  if (!currentCustomer || !currentUser) {
     return;
   }
 
-  const confirmed =
-    confirm(
-      `Opravdu chcete smazat zákazníka ${currentCustomer.full_name}?\n\nSmaže se zákazník i všechny jeho fotografie. Tuto akci nelze vrátit.`
-    );
+  const confirmed = confirm(
+    `Opravdu chcete smazat zákazníka ${currentCustomer.full_name}?\n\n` +
+    "Smaže se zákazník i všechny jeho fotografie. " +
+    "Tuto akci nelze vrátit."
+  );
 
   if (!confirmed) {
     return;
   }
 
-  const customerId =
-    currentCustomer.id;
+  const customerId = currentCustomer.id;
 
   const {
     data: photos,
     error: photosError
-  } =
-    await sb
-      .from("photos")
-      .select("path")
-      .eq(
-        "customer_id",
-        customerId
-      )
-      .eq(
-        "user_id",
-        currentUser.id
-      );
+  } = await sb
+    .from("photos")
+    .select("path")
+    .eq("customer_id", customerId)
+    .eq("user_id", currentUser.id);
 
   if (photosError) {
-    toast(
-      photosError.message
-    );
+    toast(photosError.message);
     return;
   }
 
-  if (
-    photos &&
-    photos.length
-  ) {
-    const paths =
-      photos.map(
-        photo =>
-          photo.path
-      );
+  if (photos && photos.length) {
+    const paths = photos.map(
+      photo => photo.path
+    );
 
-    const {
-      error:
-        storageError
-    } =
+    const { error: storageError } =
       await sb.storage
-        .from(
-          PHOTO_BUCKET
-        )
+        .from(PHOTO_BUCKET)
         .remove(paths);
 
     if (storageError) {
-      toast(
-        storageError.message
-      );
+      toast(storageError.message);
       return;
     }
   }
 
-  const {
-    error:
-      dbPhotosError
-  } =
+  const { error: dbPhotosError } =
     await sb
       .from("photos")
       .delete()
-      .eq(
-        "customer_id",
-        customerId
-      )
-      .eq(
-        "user_id",
-        currentUser.id
-      );
+      .eq("customer_id", customerId)
+      .eq("user_id", currentUser.id);
 
   if (dbPhotosError) {
-    toast(
-      dbPhotosError.message
-    );
+    toast(dbPhotosError.message);
     return;
   }
 
-  const { error } =
-    await sb
-      .from("customers")
-      .delete()
-      .eq(
-        "id",
-        customerId
-      )
-      .eq(
-        "user_id",
-        currentUser.id
-      );
+  const { error } = await sb
+    .from("customers")
+    .delete()
+    .eq("id", customerId)
+    .eq("user_id", currentUser.id);
 
   if (error) {
-    toast(
-      error.message
-    );
+    toast(error.message);
     return;
   }
 
-  customers =
-    customers.filter(
-      c =>
-        c.id !==
-        customerId
-    );
+  customers = customers.filter(
+    c => c.id !== customerId
+  );
 
-  currentCustomer =
-    null;
+  currentCustomer = null;
 
   renderHome();
   renderCustomers();
   renderAnnualServices();
   renderDone();
 
-  showView(
-    "customersView"
-  );
+  showView("customersView");
 
-  toast(
-    "Zákazník byl smazán."
-  );
+  toast("Zákazník byl smazán.");
 }
 
 /* =========================================================
@@ -1194,14 +1105,11 @@ async function deleteCustomer() {
    ========================================================= */
 
 /*
-   POZOR:
-   TADY SE ROČNÍ SERVIS NENASTAVUJE.
-
    Dokončení opravy pouze:
    - změní stav na Dokončeno
    - uloží datum dokončení
 
-   Převod na roční servis se dělá zvlášť
+   Roční servis se nastavuje samostatně
    tlačítkem "Převést na roční servis".
 */
 
@@ -1210,58 +1118,39 @@ async function completeRepair() {
     return;
   }
 
-  const confirmed =
-    confirm(
-      `Označit servis zákazníka ${
-        currentCustomer.full_name
-      } jako dokončený?`
-    );
+  const confirmed = confirm(
+    `Označit servis zákazníka ${currentCustomer.full_name} jako dokončený?`
+  );
 
   if (!confirmed) {
     return;
   }
 
-  const { data, error } =
-    await sb
-      .from("customers")
-      .update({
-        status:
-          "Dokončeno",
-        completed_at:
-          new Date().toISOString(),
-        updated_at:
-          new Date().toISOString()
-      })
-      .eq(
-        "id",
-        currentCustomer.id
-      )
-      .eq(
-        "user_id",
-        currentUser.id
-      )
-      .select()
-      .single();
+  const { data, error } = await sb
+    .from("customers")
+    .update({
+      status: "Dokončeno",
+      completed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", currentCustomer.id)
+    .eq("user_id", currentUser.id)
+    .select()
+    .single();
 
   if (error) {
-    toast(
-      error.message
-    );
+    toast(error.message);
     return;
   }
 
-  currentCustomer =
-    data;
+  currentCustomer = data;
 
-  const index =
-    customers.findIndex(
-      c =>
-        c.id === data.id
-    );
+  const index = customers.findIndex(
+    c => c.id === data.id
+  );
 
   if (index !== -1) {
-    customers[index] =
-      data;
+    customers[index] = data;
   }
 
   renderHome();
@@ -1270,9 +1159,7 @@ async function completeRepair() {
   renderDone();
   renderDetail();
 
-  toast(
-    "Servis byl označen jako hotový."
-  );
+  toast("Servis byl označen jako hotový.");
 }
 
 /* =========================================================
@@ -1283,53 +1170,41 @@ async function createCustomer(e) {
   e.preventDefault();
 
   if (!currentUser) {
-    toast(
-      "Nejste přihlášen."
-    );
+    toast("Nejste přihlášen.");
     return;
   }
 
-  const fullName =
-    $("fullName")
-      .value
-      .trim();
+  const fullName = $("fullName")
+    .value
+    .trim();
 
   if (!fullName) {
-    toast(
-      "Vyplňte jméno zákazníka."
-    );
+    toast("Vyplňte jméno zákazníka.");
     return;
   }
 
-  const appointmentInput =
-    $("appointmentAt");
+  const appointmentInput = $("appointmentAt");
 
   const payload = {
-    user_id:
-      currentUser.id,
+    user_id: currentUser.id,
 
-    full_name:
-      fullName,
+    full_name: fullName,
 
-    phone:
-      $("phone")
-        .value
-        .trim(),
+    phone: $("phone")
+      .value
+      .trim(),
 
-    email:
-      $("email")
-        .value
-        .trim(),
+    email: $("email")
+      .value
+      .trim(),
 
-    address:
-      $("address")
-        .value
-        .trim(),
+    address: $("address")
+      .value
+      .trim(),
 
-    problem:
-      $("problem")
-        .value
-        .trim(),
+    problem: $("problem")
+      .value
+      .trim(),
 
     appointment_at:
       appointmentInput &&
@@ -1339,19 +1214,14 @@ async function createCustomer(e) {
           ).toISOString()
         : null,
 
-    status:
-      "Naplánováno"
+    status: "Naplánováno"
   };
 
-  const {
-    data,
-    error
-  } =
-    await sb
-      .from("customers")
-      .insert(payload)
-      .select()
-      .single();
+  const { data, error } = await sb
+    .from("customers")
+    .insert(payload)
+    .select()
+    .single();
 
   if (error) {
     console.error(
@@ -1359,18 +1229,14 @@ async function createCustomer(e) {
       error
     );
 
-    toast(
-      error.message
-    );
+    toast(error.message);
     return;
   }
 
   customers = [
     data,
     ...customers.filter(
-      c =>
-        c.id !==
-        data.id
+      c => c.id !== data.id
     )
   ];
 
@@ -1382,22 +1248,16 @@ async function createCustomer(e) {
   renderCustomers();
   renderCalendar();
 
-  currentCustomer =
-    data;
+  currentCustomer = data;
 
   renderDetail();
 
-  showView(
-    "detailView"
-  );
+  showView("detailView");
 
   await renderGallery();
 
-  toast(
-    "Zákazník uložen."
-  );
+  toast("Zákazník uložen.");
 }
-
 /* =========================================================
    FOTOGRAFIE
    ========================================================= */
@@ -1793,9 +1653,8 @@ async function renderGallery() {
         .join("");
   }
 }
-
 /* =========================================================
-   HOTOVÉ
+   DOKONČENÉ ZAKÁZKY
    ========================================================= */
 
 function renderDone() {
@@ -1998,51 +1857,62 @@ function renderAnnualServices() {
 /* =========================================================
    KALENDÁŘ
    ========================================================= */
+/* =========================================================
+   KALENDÁŘ
+   ========================================================= */
 
-function getCalendarJobs(
-  year,
-  month
-) {
-  return customers.filter(
-    c => {
-      if (
-        c.status ===
-        "Dokončeno"
-      ) {
-        return false;
-      }
+function getCalendarEvents() {
+  const events = [];
 
-      if (
-        !c.appointment_at
-      ) {
-        return false;
-      }
-
-      const d =
-        new Date(
-          c.appointment_at
-        );
-
-      return (
-        d.getFullYear() ===
-          year &&
-        d.getMonth() ===
-          month
-      );
+  for (const c of customers) {
+    if (
+      c.appointment_at &&
+      c.status !== "Dokončeno"
+    ) {
+      events.push({
+        ...c,
+        calendarType: "appointment"
+      });
     }
-  );
+
+    if (c.annual_service_due) {
+      const day = c.annual_service_due;
+
+      const alreadyScheduled =
+        c.appointment_at &&
+        c.status !== "Dokončeno" &&
+        appointmentDateKey(c.appointment_at) === day;
+
+      if (!alreadyScheduled) {
+        events.push({
+          ...c,
+          appointment_at: day + "T09:00:00",
+          calendarType: "annual"
+        });
+      }
+    }
+  }
+
+  return events;
 }
 
-function calendarMonthName(
-  date
-) {
+function getCalendarJobs(year, month) {
+  return getCalendarEvents().filter(c => {
+    const d = new Date(c.appointment_at);
+
+    return (
+      d.getFullYear() === year &&
+      d.getMonth() === month
+    );
+  });
+}
+
+function calendarMonthName(date) {
   return new Intl.DateTimeFormat(
     "cs-CZ",
     {
-      month:
-        "long",
-      year:
-        "numeric"
+      month: "long",
+      year: "numeric"
     }
   ).format(date);
 }
@@ -2062,17 +1932,10 @@ function renderCalendar() {
     calendarDate.getMonth();
 
   const jobs =
-    getCalendarJobs(
-      year,
-      month
-    );
+    getCalendarJobs(year, month);
 
   const first =
-    new Date(
-      year,
-      month,
-      1
-    );
+    new Date(year, month, 1);
 
   const daysInMonth =
     new Date(
@@ -2137,9 +2000,7 @@ function renderCalendar() {
             text-transform:capitalize;
           ">
           ${esc(
-            calendarMonthName(
-              calendarDate
-            )
+            calendarMonthName(calendarDate)
           )}
         </h2>
 
@@ -2192,16 +2053,13 @@ function renderCalendar() {
 
   for (
     let day = 1;
-    day <=
-    daysInMonth;
+    day <= daysInMonth;
     day++
   ) {
     const key =
       year +
       "-" +
-      pad2(
-        month + 1
-      ) +
+      pad2(month + 1) +
       "-" +
       pad2(day);
 
@@ -2219,8 +2077,7 @@ function renderCalendar() {
       ) === key;
 
     const selected =
-      selectedCalendarDay ===
-      key;
+      selectedCalendarDay === key;
 
     html += `
       <button
@@ -2271,8 +2128,7 @@ function renderCalendar() {
                 ">
                 ${dayJobs.length}
                 ${
-                  dayJobs.length ===
-                  1
+                  dayJobs.length === 1
                     ? " servis"
                     : " servisy"
                 }
@@ -2306,15 +2162,64 @@ function renderCalendar() {
     </div>
   `;
 
-  container.innerHTML =
-    html;
+  container.innerHTML = html;
+
+  /*
+    Zobrazení jmen zákazníků
+    přímo v kalendáři.
+  */
+
+  container
+    .querySelectorAll(
+      "[data-calendar-day]"
+    )
+    .forEach(button => {
+      const dayEvents =
+        jobs.filter(
+          c =>
+            appointmentDateKey(
+              c.appointment_at
+            ) ===
+            button.dataset.calendarDay
+        );
+
+      if (!dayEvents.length) {
+        return;
+      }
+
+      const names =
+        document.createElement(
+          "div"
+        );
+
+      names.style.cssText =
+        "font-size:11px;" +
+        "overflow-wrap:anywhere;" +
+        "margin-top:5px";
+
+      names.innerHTML =
+        dayEvents
+          .map(
+            c => `
+              <div>
+                ${
+                  c.calendarType === "annual"
+                    ? "🔧"
+                    : "📅"
+                }
+                ${esc(c.full_name)}
+              </div>
+            `
+          )
+          .join("");
+
+      button.appendChild(names);
+    });
 
   const detail =
     $("calendarDayDetail");
 
-  if (
-    selectedCalendarDay
-  ) {
+  if (selectedCalendarDay) {
     renderCalendarDay(
       selectedCalendarDay
     );
@@ -2370,7 +2275,6 @@ function renderCalendar() {
     };
   }
 }
-
 function renderCalendarDay(
   key
 ) {
@@ -2385,16 +2289,7 @@ function renderCalendarDay(
     key;
 
   const jobs =
-    customers
-      .filter(
-        c =>
-          c.status !==
-          "Dokončeno"
-      )
-      .filter(
-        c =>
-          c.appointment_at
-      )
+    getCalendarEvents()
       .filter(
         c =>
           appointmentDateKey(
@@ -2598,36 +2493,269 @@ function openAnnualServices() {
 
   renderAnnualServices();
 }
+/* =========================================================
+   NAPLÁNOVÁNÍ TERMÍNU Z KALENDÁŘE
+   ========================================================= */
 
-function planFromCalendar(
-  value
-) {
-  const parts =
-    value.split("|");
+async function planFromCalendar(value) {
+  const [dateKey, time] = String(value || "").split("|");
 
-  const dateKey =
-    parts[0];
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(dateKey || "") ||
+    !/^\d{2}:00$/.test(time || "")
+  ) {
+    toast("Neplatný termín.");
+    return;
+  }
 
-  const time =
-    parts[1];
+  /*
+    Pokud neplánujeme existujícího zákazníka,
+    otevře se formulář nového zákazníka
+    s předvyplněným termínem.
+  */
 
-  showView(
-    "customerFormView"
-  );
+  if (!planningCustomerId) {
+    showView("customerFormView");
 
-  setTimeout(() => {
-    const input =
-      $("appointmentAt");
+    const input = $("appointmentAt");
 
-    if (!input) {
-      return;
+    if (input) {
+      input.value = `${dateKey}T${time}`;
     }
 
-    input.value =
-      `${dateKey}T${time}`;
-  }, 50);
+    return;
+  }
+
+  /*
+    Kontrola přihlášení.
+  */
+
+  if (!currentUser) {
+    toast("Nejprve se přihlas.");
+    return;
+  }
+
+  /*
+    Najdeme zákazníka, kterého plánujeme.
+  */
+
+  const customer = customers.find(
+    c => c.id === planningCustomerId
+  );
+
+  if (!customer) {
+    toast("Zákazník nebyl nalezen.");
+    return;
+  }
+
+  /*
+    Vytvoříme datum a čas.
+  */
+
+  const appointment = new Date(
+    `${dateKey}T${time}:00`
+  );
+
+  if (
+    Number.isNaN(appointment.getTime())
+  ) {
+    toast("Neplatný termín.");
+    return;
+  }
+
+  /*
+    Ověříme, zda už není hodina obsazená.
+
+    Vlastní záznam zákazníka ignorujeme,
+    aby šlo jeho termín změnit.
+  */
+
+  const occupied = getCalendarEvents().some(
+    event =>
+      event.id !== customer.id &&
+      appointmentDateKey(
+        event.appointment_at
+      ) === dateKey &&
+      appointmentTime(
+        event.appointment_at
+      ) === time
+  );
+
+  if (occupied) {
+    toast("Tato hodina je obsazená.");
+    return;
+  }
+
+  /*
+    Potvrzení vybraného termínu.
+  */
+
+  const confirmed = confirm(
+    `Naplánovat ${customer.full_name} na ${fmtDate(
+      appointment,
+      true
+    )}?`
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  /*
+    Uložení termínu do Supabase.
+  */
+
+  const { data, error } = await sb
+    .from("customers")
+    .update({
+      appointment_at: appointment.toISOString(),
+      status: "Naplánováno",
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", customer.id)
+    .eq("user_id", currentUser.id)
+    .select()
+    .single();
+
+  if (error) {
+    toast(
+      "Nepodařilo se uložit: " +
+      error.message
+    );
+
+    return;
+  }
+
+  /*
+    Aktualizace zákazníka v aplikaci.
+  */
+
+  customers = customers.map(
+    c =>
+      c.id === data.id
+        ? data
+        : c
+  );
+
+  currentCustomer = data;
+
+  /*
+    Ukončení režimu plánování.
+  */
+
+  planningCustomerId = null;
+
+  selectedCalendarDay = dateKey;
+
+  /*
+    Obnovení přehledů.
+  */
+
+  renderHome();
+  renderCustomers();
+  renderAnnualServices();
+  renderDone();
+  renderCalendar();
+
+  toast("Termín byl uložen.");
 }
 
+/* =========================================================
+   TLAČÍTKO V DETAILU ZÁKAZNÍKA
+   ========================================================= */
+
+function ensurePlanCustomerButton() {
+  const detail = $("detailView");
+
+  if (
+    !detail ||
+    $("planCustomerBtn")
+  ) {
+    return;
+  }
+
+  const button = document.createElement(
+    "button"
+  );
+
+  button.id = "planCustomerBtn";
+
+  button.type = "button";
+
+  button.className = "primary";
+
+  button.textContent =
+    "📅 Naplánovat do kalendáře";
+
+  button.style.margin = "10px 5px";
+
+  /*
+    Tlačítko umístíme vedle
+    tlačítka pro dokončení servisu.
+  */
+
+  const anchor = $("completeBtn");
+
+  (
+    anchor?.parentElement ||
+    detail
+  ).appendChild(button);
+
+  /*
+    Kliknutí otevře kalendář.
+  */
+
+  button.addEventListener(
+    "click",
+    planCustomerFromDetail
+  );
+}
+
+/* =========================================================
+   OTEVŘENÍ KALENDÁŘE Z DETAILU
+   ========================================================= */
+
+function planCustomerFromDetail() {
+  if (!currentCustomer) {
+    toast("Nejprve vyber zákazníka.");
+    return;
+  }
+
+  /*
+    Zapamatujeme si zákazníka,
+    kterého chceme naplánovat.
+  */
+
+  planningCustomerId = currentCustomer.id;
+
+  /*
+    Pokud má zákazník termín ročního servisu,
+    otevřeme kalendář v daném měsíci.
+
+    Jinak otevřeme aktuální měsíc.
+  */
+
+  const d = currentCustomer.annual_service_due
+    ? new Date(
+        currentCustomer.annual_service_due +
+        "T12:00:00"
+      )
+    : new Date();
+
+  calendarDate = new Date(
+    d.getFullYear(),
+    d.getMonth(),
+    1
+  );
+
+  selectedCalendarDay = null;
+
+  /*
+    Zobrazíme kalendář.
+  */
+
+  openCalendar();
+}
 /* =========================================================
    DYNAMICKÉ SEKCE
    ========================================================= */
@@ -3128,665 +3256,78 @@ async function initApp() {
     const { data, error } = await sb.auth.getSession();
 
     if (error) {
-      console.error("Chyba přihlášení:", error);
-      toast("Chyba přihlášení: " + error.message);
+      throw error;
     }
 
-    await startApp(data?.session || null);
-
+    await startApp(
+      data?.session || null
+    );
   } catch (error) {
-    console.error("Chyba spuštění aplikace:", error);
-    toast("Aplikaci se nepodařilo spustit.");
-  }
+    console.error(
+      "Chyba při spuštění aplikace:",
+      error
+    );
 
-  sb.auth.onAuthStateChange((event, session) => {
+    toast(
+      "Chyba spuštění: " +
+      error.message
+    );
 
-    // Zpracování přihlášení mimo callback Supabase
-    setTimeout(() => {
-
-      startApp(session).catch(error => {
-        console.error("Chyba načtení aplikace:", error);
-        toast("Chyba načtení: " + error.message);
-      });
-
-    }, 0);
-
-  });
-}
-
-initApp();
-/* =========================================================
-   SERVIS S FANOUŠEM
-   ROČNÍ SERVISY + PLÁNOVÁNÍ Z DETAILU
-   ========================================================= */
-
-
-/* =========================================================
-   1. TLAČÍTKO V DETAILU ZÁKAZNÍKA
-   ========================================================= */
-
-const puvodniEnsureAnnualButton = ensureAnnualButton;
-
-ensureAnnualButton = function () {
-
-  puvodniEnsureAnnualButton();
-
-  const detail = document.getElementById("detailView");
-
-  if (!detail) return;
-
-  let button = document.getElementById("planCustomerBtn");
-
-  if (!button) {
-
-    button = document.createElement("button");
-
-    button.id = "planCustomerBtn";
-
-    button.className = "primary";
-
-    button.textContent = "📅 Naplánovat do kalendáře";
-
-    button.style.margin = "10px 5px";
-    button.style.background = "#2563eb";
-    button.style.color = "white";
-
-    const completeBtn = document.getElementById("completeBtn");
-
-    if (completeBtn && completeBtn.parentElement) {
-
-      completeBtn.parentElement.appendChild(button);
-
-    } else {
-
-      detail.appendChild(button);
-
+    if ($("authView")) {
+      $("authView").classList.remove(
+        "hidden"
+      );
     }
-
-    button.addEventListener("click", planCustomerFromDetail);
-
   }
 
-};
+  /*
+    Supabase změny přihlášení.
 
+    Nevoláme další Supabase požadavky
+    přímo uvnitř auth callbacku.
 
-/* =========================================================
-   2. PLÁNOVÁNÍ Z DETAILU
-   ========================================================= */
+    To pomáhá zabránit zablokování
+    přihlášení.
+  */
 
-async function planCustomerFromDetail() {
-
-  if (!currentCustomer) {
-    toast("Nejprve vyber zákazníka.");
-    return;
-  }
-
-  // Zapamatujeme si zákazníka
-  planningCustomerId = currentCustomer.id;
-
-  // Otevřeme měsíc jeho ročního servisu,
-  // případně aktuální měsíc
-  const datum = currentCustomer.annual_service_due
-    ? new Date(currentCustomer.annual_service_due + "T12:00:00")
-    : new Date();
-
-  calendarDate = new Date(
-    datum.getFullYear(),
-    datum.getMonth(),
-    1
-  );
-
-  selectedCalendarDay = null;
-
-  // Otevření velkého kalendáře
-  openCalendar();
-
-}
-
-  const customer = currentCustomer;
-
-  const today = localDateKey(new Date());
-
-  const defaultDate = customer.appointment_at
-    ? appointmentDateKey(customer.appointment_at)
-    : customer.annual_service_due || today;
-
-  const date = prompt(
-    "Zadej datum návštěvy (RRRR-MM-DD):",
-    defaultDate
-  );
-
-  if (date === null) return;
-
-  const dateText = date.trim();
-
-  const parsedDate = new Date(dateText + "T12:00:00");
-
-  if (
-    !/^\d{4}-\d{2}-\d{2}$/.test(dateText) ||
-    Number.isNaN(parsedDate.getTime()) ||
-    localDateKey(parsedDate) !== dateText
-  ) {
-
-    toast("Neplatné datum. Použij například 2027-10-13.");
-
-    return;
-
-  }
-
-  const defaultTime = customer.appointment_at
-    ? appointmentTime(customer.appointment_at)
-    : "09:00";
-
-  const time = prompt(
-    "Zadej čas návštěvy (HH:MM):",
-    defaultTime
-  );
-
-  if (time === null) return;
-
-  const timeText = time.trim();
-
-  if (
-    !/^([01]\d|2[0-3]):[0-5]\d$/.test(timeText)
-  ) {
-
-    toast("Neplatný čas. Použij například 09:00.");
-
-    return;
-
-  }
-
-  const appointment = new Date(
-    dateText + "T" + timeText + ":00"
-  );
-
-  const confirmed = confirm(
-    "Naplánovat zákazníka " +
-    customer.full_name +
-    " na " +
-    fmtDate(appointment.toISOString(), true) +
-    "?"
-  );
-
-  if (!confirmed) return;
-
-  const { data, error } = await sb
-    .from("customers")
-    .update({
-      appointment_at: appointment.toISOString(),
-      updated_at: new Date().toISOString()
-    })
-    .eq("id", customer.id)
-    .eq("user_id", currentUser.id)
-    .select()
-    .single();
-
-  if (error) {
-
-    toast("Chyba při ukládání: " + error.message);
-
-    return;
-
-  }
-
-  const index = customers.findIndex(
-    c => c.id === data.id
-  );
-
-  if (index !== -1) {
-    customers[index] = data;
-  }
-
-  currentCustomer = data;
-
-  calendarDate = new Date(
-    appointment.getFullYear(),
-    appointment.getMonth(),
-    1
-  );
-
-  selectedCalendarDay = dateText;
-
-  renderDetail();
-  renderHome();
-  renderCustomers();
-  renderAnnualServices();
-  renderDone();
-  renderCalendar();
-
-  toast("Návštěva byla uložena do kalendáře.");
-
-}
-
-
-/* =========================================================
-   3. SPOLEČNÝ SEZNAM UDÁLOSTÍ
-   ========================================================= */
-
-function getAllCalendarEvents() {
-
-  const events = [];
-
-  customers.forEach(customer => {
-
-    /*
-      Ručně naplánovaná návštěva
-    */
-
-    if (customer.appointment_at) {
-
-      events.push({
-        ...customer,
-        status: "Naplánováno",
-        calendarType: "manual"
-      });
-
-    }
-
-    /*
-      Automatický roční servis
-    */
-
-    if (customer.annual_service_due) {
-
-      const annualDate = customer.annual_service_due;
-
-      const manualDate = customer.appointment_at
-        ? appointmentDateKey(customer.appointment_at)
-        : null;
-
-      /*
-        Pokud je ruční návštěva ve stejný den
-        jako roční servis, nevytvoříme duplicitu.
-      */
-
-      if (manualDate !== annualDate) {
-
-        events.push({
-          ...customer,
-          appointment_at: annualDate + "T09:00:00",
-          status: "Naplánováno",
-          calendarType: "annual"
-        });
-
+  sb.auth.onAuthStateChange(
+    (event, newSession) => {
+      if (
+        event !== "SIGNED_IN" &&
+        event !== "SIGNED_OUT" &&
+        event !== "USER_UPDATED"
+      ) {
+        return;
       }
 
+      setTimeout(
+        () => {
+          startApp(
+            newSession
+          ).catch(error => {
+            console.error(
+              "Chyba při změně přihlášení:",
+              error
+            );
+
+            toast(
+              "Chyba načtení aplikace: " +
+              error.message
+            );
+          });
+        },
+        0
+      );
     }
-
-  });
-
-  return events;
-
+  );
 }
 
-
 /* =========================================================
-   4. ZOBRAZENÍ ROČNÍCH SERVISŮ V KALENDÁŘI
+   START
    ========================================================= */
 
-const originalRenderCalendar = renderCalendar;
-
-const originalRenderCalendarDay = renderCalendarDay;
-
-
-/*
-  Pro vykreslení použijeme společný seznam.
-  Původní zákazníky v paměti neměníme.
-*/
-
-function withCalendarEvents(callback) {
-
-  const originalCustomers = customers;
-
-  try {
-
-    customers = getAllCalendarEvents();
-
-    return callback();
-
-  } finally {
-
-    customers = originalCustomers;
-
-  }
-
-}
-
-
-/*
-  Původní kalendář zůstává zachovaný.
-  Pouze mu při vykreslení předáme
-  i automatické roční servisy.
-*/
-
-renderCalendar = function () {
-
-  return withCalendarEvents(() => {
-
-    originalRenderCalendar();
-
-  });
-
-};
-
-
-renderCalendarDay = function (key) {
-
-  return withCalendarEvents(() => {
-
-    originalRenderCalendarDay(key);
-
-  });
-
-};
-
+initApp();
 
 /* =========================================================
-   KONEC ÚPRAV
+   KONEC APP.JS
    ========================================================= */
-/* =========================================================
-   PLÁNOVÁNÍ ZÁKAZNÍKA PŘES VELKÝ KALENDÁŘ
-   ========================================================= */
-
-// Zákazník, kterého právě plánujeme
-let planningCustomerId = null;
-
-
-/* =========================================================
-   1. OTEVŘENÍ KALENDÁŘE Z DETAILU
-   ========================================================= */
-
-planCustomerFromDetail = function () {
-
-  if (!currentCustomer) {
-    toast("Nejprve vyber zákazníka.");
-    return;
-  }
-
-  planningCustomerId = currentCustomer.id;
-
-  // Otevřeme měsíc, ve kterém má zákazník
-  // roční servis, případně současný měsíc.
-  const date = currentCustomer.annual_service_due
-    ? new Date(currentCustomer.annual_service_due + "T12:00:00")
-    : new Date();
-
-  calendarDate = new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    1
-  );
-
-  selectedCalendarDay = null;
-
-  openCalendar();
-
-};
-
-
-/* =========================================================
-   2. INFORMAČNÍ PANEL NAD KALENDÁŘEM
-   ========================================================= */
-
-const puvodniRenderCalendarPrehled = renderCalendar;
-
-renderCalendar = function () {
-
-  puvodniRenderCalendarPrehled();
-
-  const container = $("calendarContainer");
-
-  if (!container) return;
-
-  // Pokud právě nikoho neplánujeme,
-  // zobrazíme běžný kalendář.
-  if (!planningCustomerId) return;
-
-  const customer = customers.find(
-    c => c.id === planningCustomerId
-  );
-
-  if (!customer) {
-    planningCustomerId = null;
-    return;
-  }
-
-  const panel = document.createElement("div");
-
-  panel.id = "planningInfo";
-
-  panel.style.cssText = `
-    background: #eff6ff;
-    border: 2px solid #2563eb;
-    border-radius: 12px;
-    padding: 16px;
-    margin-bottom: 20px;
-  `;
-
-  panel.innerHTML = `
-    <h3 style="margin-top:0">
-      📅 Plánování zákazníka
-    </h3>
-
-    <strong>${esc(customer.full_name)}</strong>
-
-    <p>
-      Vyber den v kalendáři a potom
-      klikni na volnou hodinu.
-    </p>
-
-    <button
-      type="button"
-      id="cancelPlanningBtn"
-      class="secondary">
-      Zrušit plánování
-    </button>
-  `;
-
-  container.prepend(panel);
-
-  $("cancelPlanningBtn").onclick = () => {
-
-    planningCustomerId = null;
-
-    renderCalendar();
-
-  };
-
-};
-
-
-/* =========================================================
-   3. VÝBĚR VOLNÉHO ČASU
-   ========================================================= */
-
-const puvodniPlanFromCalendar = planFromCalendar;
-
-planFromCalendar = async function (value) {
-
-  // Pokud zákazníka neplánujeme,
-  // zachováme původní funkci kalendáře.
-  if (!planningCustomerId) {
-
-    puvodniPlanFromCalendar(value);
-
-    return;
-  }
-
-  if (!currentUser) {
-    toast("Nejprve se přihlas.");
-    return;
-  }
-
-  const customer = customers.find(
-    c => c.id === planningCustomerId
-  );
-
-  if (!customer) {
-    toast("Zákazník nebyl nalezen.");
-    return;
-  }
-
-  const [dateKey, time] = value.split("|");
-
-  const appointment = new Date(
-    `${dateKey}T${time}:00`
-  );
-
-  if (Number.isNaN(appointment.getTime())) {
-    toast("Neplatné datum nebo čas.");
-    return;
-  }
-
-  // Ověříme, jestli už na tuto hodinu
-  // není naplánovaný jiný zákazník.
-  const occupied = getAllCalendarEvents().some(event => {
-
-    if (event.id === customer.id) return false;
-
-    return (
-      appointmentDateKey(event.appointment_at) === dateKey &&
-      appointmentTime(event.appointment_at) === time
-    );
-
-  });
-
-  if (occupied) {
-    toast("Tento čas už je obsazený.");
-    return;
-  }
-
-  const confirmed = confirm(
-    `Naplánovat zákazníka ${customer.full_name}\n` +
-    `na ${fmtDate(appointment.toISOString(), true)}?`
-  );
-
-  if (!confirmed) return;
-
-  const { data, error } = await sb
-    .from("customers")
-    .update({
-      appointment_at: appointment.toISOString(),
-      updated_at: new Date().toISOString()
-    })
-    .eq("id", customer.id)
-    .eq("user_id", currentUser.id)
-    .select()
-    .single();
-
-  if (error) {
-
-    toast("Nepodařilo se uložit: " + error.message);
-
-    return;
-
-  }
-
-  // Aktualizace zákazníka v aplikaci
-  const index = customers.findIndex(
-    c => c.id === data.id
-  );
-
-  if (index !== -1) {
-    customers[index] = data;
-  }
-
-  currentCustomer = data;
-
-  // Ukončíme režim plánování
-  planningCustomerId = null;
-
-  // Zobrazíme kalendář na uloženém dni
-  calendarDate = new Date(
-    appointment.getFullYear(),
-    appointment.getMonth(),
-    1
-  );
-
-  selectedCalendarDay = dateKey;
-
-  renderHome();
-  renderCustomers();
-  renderAnnualServices();
-  renderDone();
-  renderCalendar();
-
-  toast(
-    `Zákazník ${data.full_name} byl naplánován.`
-  );
-
-};
-
-
-/* =========================================================
-   4. PŘEHLED ZÁKAZNÍKŮ PŘÍMO V KALENDÁŘI
-   ========================================================= */
-
-const puvodniRenderCalendarSeJmeny = renderCalendar;
-
-renderCalendar = function () {
-
-  puvodniRenderCalendarSeJmeny();
-
-  const events = getAllCalendarEvents();
-
-  document.querySelectorAll(
-    "#calendarContainer [data-calendar-day]"
-  ).forEach(button => {
-
-    const dateKey = button.dataset.calendarDay;
-
-    const dayEvents = events.filter(event =>
-      appointmentDateKey(event.appointment_at) === dateKey
-    );
-
-    if (!dayEvents.length) return;
-
-    const names = document.createElement("div");
-
-    names.style.cssText = `
-      margin-top: 5px;
-      font-size: 11px;
-      line-height: 1.4;
-      overflow-wrap: anywhere;
-    `;
-
-    names.innerHTML = dayEvents.map(event => {
-
-      const annual = event.calendarType === "annual";
-
-      return `
-        <div style="
-          margin-top: 3px;
-          padding: 3px;
-          border-radius: 4px;
-          background: ${annual ? "#dcfce7" : "#fee2e2"};
-        ">
-          ${annual ? "🔧" : "📅"}
-          ${esc(event.full_name)}
-        </div>
-      `;
-
-    }).join("");
-
-    button.appendChild(names);
-
-  });
-
-};
-
-
-/* =========================================================
-   5. UKONČENÍ REŽIMU PLÁNOVÁNÍ
-   ========================================================= */
-
-const puvodniOpenCalendar = openCalendar;
-
-openCalendar = function () {
-
-  // Běžné otevření kalendáře z domovské stránky
-  // ponecháme beze změny.
-  puvodniOpenCalendar();
-
-};
