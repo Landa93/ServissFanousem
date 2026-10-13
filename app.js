@@ -3209,13 +3209,32 @@ ensureAnnualButton = function () {
 
 async function planCustomerFromDetail() {
 
-  if (!currentCustomer || !currentUser) {
-
-    toast("Nejprve otevři zákazníka.");
-
+  if (!currentCustomer) {
+    toast("Nejprve vyber zákazníka.");
     return;
-
   }
+
+  // Zapamatujeme si zákazníka
+  planningCustomerId = currentCustomer.id;
+
+  // Otevřeme měsíc jeho ročního servisu,
+  // případně aktuální měsíc
+  const datum = currentCustomer.annual_service_due
+    ? new Date(currentCustomer.annual_service_due + "T12:00:00")
+    : new Date();
+
+  calendarDate = new Date(
+    datum.getFullYear(),
+    datum.getMonth(),
+    1
+  );
+
+  selectedCalendarDay = null;
+
+  // Otevření velkého kalendáře
+  openCalendar();
+
+}
 
   const customer = currentCustomer;
 
