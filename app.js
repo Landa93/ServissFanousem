@@ -3459,3 +3459,308 @@ renderCalendarDay = function (key) {
 /* =========================================================
    KONEC ÚPRAV
    ========================================================= */
+/* =========================================================
+   PLÁNOVÁNÍ ZÁKAZNÍKA PŘES VELKÝ KALENDÁŘ
+   ========================================================= */
+
+// Zákazník, kterého právě plánujeme
+let planningCustomerId = null;
+
+
+/* =========================================================
+   1. OTEVŘENÍ KALENDÁŘE Z DETAILU
+   ========================================================= */
+
+planCustomerFromDetail = function () {
+
+  if (!currentCustomer) {
+    toast("Nejprve vyber zákazníka.");
+    return;
+  }
+
+  planningCustomerId = currentCustomer.id;
+
+  // Otevřeme měsíc, ve kterém má zákazník
+  // roční servis, případně současný měsíc.
+  const date = currentCustomer.annual_service_due
+    ? new Date(currentCustomer.annual_service_due + "T12:00:00")
+    : new Date();
+
+  calendarDate = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    1
+  );
+
+  selectedCalendarDay = null;
+
+  openCalendar();
+
+};
+
+
+/* =========================================================
+   2. INFORMAČNÍ PANEL NAD KALENDÁŘEM
+   ========================================================= */
+
+const puvodniRenderCalendarPrehled = renderCalendar;
+
+renderCalendar = function () {
+
+  puvodniRenderCalendarPrehled();
+
+  const container = $("calendarContainer");
+
+  if (!container) return;
+
+  // Pokud právě nikoho neplánujeme,
+  // zobrazíme běžný kalendář.
+  if (!planningCustomerId) return;
+
+  const customer = customers.find(
+    c => c.id === planningCustomerId
+  );
+
+  if (!customer) {
+    planningCustomerId = null;
+    return;
+  }
+
+  const panel = document.createElement("div");
+
+  panel.id = "planningInfo";
+
+  panel.style.cssText = `
+    background: #eff6ff;
+    border: 2px solid #2563eb;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 20px;
+  `;
+
+  panel.innerHTML = `
+    <h3 style="margin-top:0">
+      📅 Plánování zákazníka
+    </h3>
+
+    <strong>${esc(customer.full_name)}</strong>
+
+    <p>
+      Vyber den v kalendáři a potom
+      klikni na volnou hodinu.
+    </p>
+
+    <button
+      type="button"
+      id="cancelPlanningBtn"
+      class="secondary">
+      Zrušit plánování
+    </button>
+  `;
+
+  container.prepend(panel);
+
+  $("cancelPlanningBtn").onclick = () => {
+
+    planningCustomerId = null;
+
+    renderCalendar();
+
+  };
+
+};
+
+
+/* =========================================================
+   3. VÝBĚR VOLNÉHO ČASU
+   ========================================================= */
+
+const puvodniPlanFromCalendar = planFromCalendar;
+
+planFromCalendar = async function (value) {
+
+  // Pokud zákazníka neplánujeme,
+  // zachováme původní funkci kalendáře.
+  if (!planningCustomerId) {
+
+    puvodniPlanFromCalendar(value);
+
+    return;
+  }
+
+  if (!currentUser) {
+    toast("Nejprve se přihlas.");
+    return;
+  }
+
+  const customer = customers.find(
+    c => c.id === planningCustomerId
+  );
+
+  if (!customer) {
+    toast("Zákazník nebyl nalezen.");
+    return;
+  }
+
+  const [dateKey, time] = value.split("|");
+
+  const appointment = new Date(
+    `${dateKey}T${time}:00`
+  );
+
+  if (Number.isNaN(appointment.getTime())) {
+    toast("Neplatné datum nebo čas.");
+    return;
+  }
+
+  // Ověříme, jestli už na tuto hodinu
+  // není naplánovaný jiný zákazník.
+  const occupied = getAllCalendarEvents().some(event => {
+
+    if (event.id === customer.id) return false;
+
+    return (
+      appointmentDateKey(event.appointment_at) === dateKey &&
+      appointmentTime(event.appointment_at) === time
+    );
+
+  });
+
+  if (occupied) {
+    toast("Tento čas už je obsazený.");
+    return;
+  }
+
+  const confirmed = confirm(
+    `Naplánovat zákazníka ${customer.full_name}\n` +
+    `na ${fmtDate(appointment.toISOString(), true)}?`
+  );
+
+  if (!confirmed) return;
+
+  const { data, error } = await sb
+    .from("customers")
+    .update({
+      appointment_at: appointment.toISOString(),
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", customer.id)
+    .eq("user_id", currentUser.id)
+    .select()
+    .single();
+
+  if (error) {
+
+    toast("Nepodařilo se uložit: " + error.message);
+
+    return;
+
+  }
+
+  // Aktualizace zákazníka v aplikaci
+  const index = customers.findIndex(
+    c => c.id === data.id
+  );
+
+  if (index !== -1) {
+    customers[index] = data;
+  }
+
+  currentCustomer = data;
+
+  // Ukončíme režim plánování
+  planningCustomerId = null;
+
+  // Zobrazíme kalendář na uloženém dni
+  calendarDate = new Date(
+    appointment.getFullYear(),
+    appointment.getMonth(),
+    1
+  );
+
+  selectedCalendarDay = dateKey;
+
+  renderHome();
+  renderCustomers();
+  renderAnnualServices();
+  renderDone();
+  renderCalendar();
+
+  toast(
+    `Zákazník ${data.full_name} byl naplánován.`
+  );
+
+};
+
+
+/* =========================================================
+   4. PŘEHLED ZÁKAZNÍKŮ PŘÍMO V KALENDÁŘI
+   ========================================================= */
+
+const puvodniRenderCalendarSeJmeny = renderCalendar;
+
+renderCalendar = function () {
+
+  puvodniRenderCalendarSeJmeny();
+
+  const events = getAllCalendarEvents();
+
+  document.querySelectorAll(
+    "#calendarContainer [data-calendar-day]"
+  ).forEach(button => {
+
+    const dateKey = button.dataset.calendarDay;
+
+    const dayEvents = events.filter(event =>
+      appointmentDateKey(event.appointment_at) === dateKey
+    );
+
+    if (!dayEvents.length) return;
+
+    const names = document.createElement("div");
+
+    names.style.cssText = `
+      margin-top: 5px;
+      font-size: 11px;
+      line-height: 1.4;
+      overflow-wrap: anywhere;
+    `;
+
+    names.innerHTML = dayEvents.map(event => {
+
+      const annual = event.calendarType === "annual";
+
+      return `
+        <div style="
+          margin-top: 3px;
+          padding: 3px;
+          border-radius: 4px;
+          background: ${annual ? "#dcfce7" : "#fee2e2"};
+        ">
+          ${annual ? "🔧" : "📅"}
+          ${esc(event.full_name)}
+        </div>
+      `;
+
+    }).join("");
+
+    button.appendChild(names);
+
+  });
+
+};
+
+
+/* =========================================================
+   5. UKONČENÍ REŽIMU PLÁNOVÁNÍ
+   ========================================================= */
+
+const puvodniOpenCalendar = openCalendar;
+
+openCalendar = function () {
+
+  // Běžné otevření kalendáře z domovské stránky
+  // ponecháme beze změny.
+  puvodniOpenCalendar();
+
+};
