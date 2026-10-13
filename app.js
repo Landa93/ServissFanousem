@@ -725,6 +725,7 @@ function renderDetail() {
   }
 
   ensureAnnualButton();
+   ensurePlanCustomerButton();
 
   const annualBtn =
     $("transferAnnualBtn");
