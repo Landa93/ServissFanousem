@@ -3148,3 +3148,314 @@ async function initApp() {
 }
 
 initApp();
+/* =========================================================
+   SERVIS S FANOUŠEM
+   ROČNÍ SERVISY + PLÁNOVÁNÍ Z DETAILU
+   ========================================================= */
+
+
+/* =========================================================
+   1. TLAČÍTKO V DETAILU ZÁKAZNÍKA
+   ========================================================= */
+
+const puvodniEnsureAnnualButton = ensureAnnualButton;
+
+ensureAnnualButton = function () {
+
+  puvodniEnsureAnnualButton();
+
+  const detail = document.getElementById("detailView");
+
+  if (!detail) return;
+
+  let button = document.getElementById("planCustomerBtn");
+
+  if (!button) {
+
+    button = document.createElement("button");
+
+    button.id = "planCustomerBtn";
+
+    button.className = "primary";
+
+    button.textContent = "📅 Naplánovat do kalendáře";
+
+    button.style.margin = "10px 5px";
+    button.style.background = "#2563eb";
+    button.style.color = "white";
+
+    const completeBtn = document.getElementById("completeBtn");
+
+    if (completeBtn && completeBtn.parentElement) {
+
+      completeBtn.parentElement.appendChild(button);
+
+    } else {
+
+      detail.appendChild(button);
+
+    }
+
+    button.addEventListener("click", planCustomerFromDetail);
+
+  }
+
+};
+
+
+/* =========================================================
+   2. PLÁNOVÁNÍ Z DETAILU
+   ========================================================= */
+
+async function planCustomerFromDetail() {
+
+  if (!currentCustomer || !currentUser) {
+
+    toast("Nejprve otevři zákazníka.");
+
+    return;
+
+  }
+
+  const customer = currentCustomer;
+
+  const today = localDateKey(new Date());
+
+  const defaultDate = customer.appointment_at
+    ? appointmentDateKey(customer.appointment_at)
+    : customer.annual_service_due || today;
+
+  const date = prompt(
+    "Zadej datum návštěvy (RRRR-MM-DD):",
+    defaultDate
+  );
+
+  if (date === null) return;
+
+  const dateText = date.trim();
+
+  const parsedDate = new Date(dateText + "T12:00:00");
+
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(dateText) ||
+    Number.isNaN(parsedDate.getTime()) ||
+    localDateKey(parsedDate) !== dateText
+  ) {
+
+    toast("Neplatné datum. Použij například 2027-10-13.");
+
+    return;
+
+  }
+
+  const defaultTime = customer.appointment_at
+    ? appointmentTime(customer.appointment_at)
+    : "09:00";
+
+  const time = prompt(
+    "Zadej čas návštěvy (HH:MM):",
+    defaultTime
+  );
+
+  if (time === null) return;
+
+  const timeText = time.trim();
+
+  if (
+    !/^([01]\d|2[0-3]):[0-5]\d$/.test(timeText)
+  ) {
+
+    toast("Neplatný čas. Použij například 09:00.");
+
+    return;
+
+  }
+
+  const appointment = new Date(
+    dateText + "T" + timeText + ":00"
+  );
+
+  const confirmed = confirm(
+    "Naplánovat zákazníka " +
+    customer.full_name +
+    " na " +
+    fmtDate(appointment.toISOString(), true) +
+    "?"
+  );
+
+  if (!confirmed) return;
+
+  const { data, error } = await sb
+    .from("customers")
+    .update({
+      appointment_at: appointment.toISOString(),
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", customer.id)
+    .eq("user_id", currentUser.id)
+    .select()
+    .single();
+
+  if (error) {
+
+    toast("Chyba při ukládání: " + error.message);
+
+    return;
+
+  }
+
+  const index = customers.findIndex(
+    c => c.id === data.id
+  );
+
+  if (index !== -1) {
+    customers[index] = data;
+  }
+
+  currentCustomer = data;
+
+  calendarDate = new Date(
+    appointment.getFullYear(),
+    appointment.getMonth(),
+    1
+  );
+
+  selectedCalendarDay = dateText;
+
+  renderDetail();
+  renderHome();
+  renderCustomers();
+  renderAnnualServices();
+  renderDone();
+  renderCalendar();
+
+  toast("Návštěva byla uložena do kalendáře.");
+
+}
+
+
+/* =========================================================
+   3. SPOLEČNÝ SEZNAM UDÁLOSTÍ
+   ========================================================= */
+
+function getAllCalendarEvents() {
+
+  const events = [];
+
+  customers.forEach(customer => {
+
+    /*
+      Ručně naplánovaná návštěva
+    */
+
+    if (customer.appointment_at) {
+
+      events.push({
+        ...customer,
+        status: "Naplánováno",
+        calendarType: "manual"
+      });
+
+    }
+
+    /*
+      Automatický roční servis
+    */
+
+    if (customer.annual_service_due) {
+
+      const annualDate = customer.annual_service_due;
+
+      const manualDate = customer.appointment_at
+        ? appointmentDateKey(customer.appointment_at)
+        : null;
+
+      /*
+        Pokud je ruční návštěva ve stejný den
+        jako roční servis, nevytvoříme duplicitu.
+      */
+
+      if (manualDate !== annualDate) {
+
+        events.push({
+          ...customer,
+          appointment_at: annualDate + "T09:00:00",
+          status: "Naplánováno",
+          calendarType: "annual"
+        });
+
+      }
+
+    }
+
+  });
+
+  return events;
+
+}
+
+
+/* =========================================================
+   4. ZOBRAZENÍ ROČNÍCH SERVISŮ V KALENDÁŘI
+   ========================================================= */
+
+const originalRenderCalendar = renderCalendar;
+
+const originalRenderCalendarDay = renderCalendarDay;
+
+
+/*
+  Pro vykreslení použijeme společný seznam.
+  Původní zákazníky v paměti neměníme.
+*/
+
+function withCalendarEvents(callback) {
+
+  const originalCustomers = customers;
+
+  try {
+
+    customers = getAllCalendarEvents();
+
+    return callback();
+
+  } finally {
+
+    customers = originalCustomers;
+
+  }
+
+}
+
+
+/*
+  Původní kalendář zůstává zachovaný.
+  Pouze mu při vykreslení předáme
+  i automatické roční servisy.
+*/
+
+renderCalendar = function () {
+
+  return withCalendarEvents(() => {
+
+    originalRenderCalendar();
+
+  });
+
+};
+
+
+renderCalendarDay = function (key) {
+
+  return withCalendarEvents(() => {
+
+    originalRenderCalendarDay(key);
+
+  });
+
+};
+
+
+/* =========================================================
+   KONEC ÚPRAV
+   ========================================================= */
