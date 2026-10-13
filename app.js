@@ -3069,16 +3069,15 @@ document.addEventListener(
     }
 
     if (
-      e.target.closest(
-        "[data-back]"
-      )
-    ) {
-      showView(
-        "homeView"
-      );
+  e.target.closest("#newCustomerBtn") ||
+  e.target.closest('[data-nav="new"]')
+) {
+  planningCustomerId = null;
 
-      return;
-    }
+  showView("customerFormView");
+
+  return;
+}
   }
 );
 
